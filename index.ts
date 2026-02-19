@@ -41,6 +41,7 @@ Options:
   --sonnet <model>     Model mapping for claude-sonnet-* (optional if --default set)
   --opus <model>       Model mapping for claude-opus-* (optional if --default set)
   --default <model>    Default model mapping for unrecognized claude models (optional)
+  --preload            Send warmup requests to all configured models on startup
   --log-dir <path>     Directory to log conversations (optional)
   --cors-origin <url>  CORS origin (default: *, set to 'none' to disable)
   --timeout <seconds>  Request timeout in seconds (default: 120)
@@ -52,7 +53,7 @@ Example:
     --log-dir ./logs --timeout 60
 
   bun run index.ts --endpoint https://api.openai.com/v1 \
-    --default gpt-4o  # Use gpt-4o for all claude models
+    --default gpt-4o --preload  # Preload gpt-4o on startup
 `);
   process.exit(0);
 }
@@ -75,6 +76,7 @@ const MODEL_MAPPINGS = {
 const LOG_DIR = args["log-dir"];
 const CORS_ORIGIN = args["cors-origin"] || "*";
 const TIMEOUT_MS = (parseInt(args.timeout || "120", 10)) * 1000;
+const PRELOAD = args.preload === "true" || args.preload === "";
 
 // Validation
 if (!ENDPOINT) {
@@ -103,6 +105,8 @@ const modelLines = [
   MODEL_MAPPINGS.default ? `│  Default →  ${MODEL_MAPPINGS.default.padEnd(28)}│` : "",
 ].filter(Boolean).join("\n");
 
+const preloadLine = PRELOAD ? `│  Preload:   ${"enabled".padEnd(28)}│` : "";
+
 console.log(`
 ┌─────────────────────────────────────────┐
 │  Anthropic → OpenAI Router             │
@@ -110,6 +114,7 @@ console.log(`
 │  Port:      ${PORT.toString().padEnd(28)}│
 │  Endpoint:  ${ENDPOINT.padEnd(28)}│
 ${modelLines}
+${preloadLine}
 │  CORS:      ${CORS_ORIGIN.padEnd(28)}│
 │  Timeout:   ${(TIMEOUT_MS / 1000 + "s").padEnd(28)}│
 ${LOG_DIR ? `│  Log dir:   ${LOG_DIR.padEnd(28)}│` : "│  Logging:   disabled".padEnd(40) + "│"}
@@ -1075,7 +1080,63 @@ const server: Server = Bun.serve({
   },
 });
 
+// ===== Preload Function =====
+
+async function preloadModels() {
+  console.log("\n[Preload] Warming up models...");
+  
+  // Get unique list of configured models
+  const models = new Set<string>();
+  if (MODEL_MAPPINGS.haiku) models.add(MODEL_MAPPINGS.haiku);
+  if (MODEL_MAPPINGS.sonnet) models.add(MODEL_MAPPINGS.sonnet);
+  if (MODEL_MAPPINGS.opus) models.add(MODEL_MAPPINGS.opus);
+  if (MODEL_MAPPINGS.default) models.add(MODEL_MAPPINGS.default);
+  
+  const authHeader = process.env.OPENAI_API_KEY || "preload-test-key";
+  
+  for (const model of models) {
+    try {
+      console.log(`[Preload] Pinging ${model}...`);
+      
+      const response = await fetchWithTimeout(
+        `${ENDPOINT}/chat/completions`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${authHeader}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: "Hi" }],
+            max_tokens: 1,
+            stream: false,
+          }),
+        },
+        TIMEOUT_MS
+      );
+      
+      if (response.ok) {
+        console.log(`[Preload] ✓ ${model} ready`);
+      } else {
+        const error = await response.text();
+        console.log(`[Preload] ✗ ${model} failed: ${response.status} ${error.slice(0, 100)}`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log(`[Preload] ✗ ${model} error: ${message.slice(0, 100)}`);
+    }
+  }
+  
+  console.log("[Preload] Done\n");
+}
+
 console.log(`Server running at http://localhost:${PORT}/v1/messages`);
+
+// Preload models if requested
+if (PRELOAD) {
+  preloadModels();
+}
 
 // Graceful shutdown
 process.on("SIGINT", () => {
