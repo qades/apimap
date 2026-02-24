@@ -1,0 +1,65 @@
+# Universal Model Router - Configuration
+# 
+# This is a minimal starter config. See config.example.yaml for comprehensive
+# examples including YAML anchors, multiple providers, and advanced routing.
+
+server:
+  port: 3000
+  cors:
+    origin: "*"
+  timeout: 120
+
+logging:
+  dir: "./messages"
+  level: "info"
+
+preload:
+  enabled: true
+
+# API endpoints to expose
+schemes:
+  - id: anthropic
+    path: "/v1/messages"
+    format: "anthropic"
+  - id: openai
+    path: "/v1/chat/completions"
+    format: "openai"
+
+# Provider configurations (API keys from environment by default)
+providers:
+  openai:
+    # apiKeyEnv: OPENAI_API_KEY  # Default, can be omitted
+    timeout: 180
+  
+  anthropic:
+    # apiKeyEnv: ANTHROPIC_API_KEY  # Default, can be omitted
+    timeout: 180
+  
+  # Local Ollama instance
+  ollama:
+    baseUrl: "http://localhost:11434"
+    timeout: 300
+
+# Model routing rules
+routes:
+  # Claude models → Anthropic API
+  - pattern: "claude-*"
+    provider: anthropic
+    priority: 100
+  
+  # GPT models → OpenAI API
+  - pattern: "gpt-*"
+    provider: openai
+    priority: 90
+  
+  # Local Ollama models
+  - pattern: "llama*"
+    provider: ollama
+    priority: 80
+  
+  - pattern: "mistral*"
+    provider: ollama
+    priority: 80
+
+# Default provider for unmatched models
+defaultProvider: openai

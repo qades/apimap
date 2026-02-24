@@ -1,0 +1,426 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Universal Model Router - Example Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+# 
+# This is a comprehensive example showing all features of the Universal Model
+# Router. Copy this to config.yaml and customize for your needs.
+#
+# Features demonstrated:
+#   - YAML anchors (&) and aliases (*) for DRY configuration
+#   - Multiple API schemes (OpenAI, Anthropic, etc.)
+#   - Pattern-based model routing with wildcards
+#   - Multiple provider configurations
+#   - Local LLM support (Ollama, LM Studio, etc.)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Server Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+server:
+  port: 3000                    # Port to listen on
+  host: "0.0.0.0"              # Host to bind to (0.0.0.0 = all interfaces)
+  cors:
+    origin: "*"                # CORS origin (* = any, or specific domain)
+    credentials: false         # Allow credentials
+  timeout: 120                 # Request timeout in seconds
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Logging Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+logging:
+  dir: "./logs"                # Directory for request logs (null to disable)
+  level: "info"                # Log level: debug, info, warn, error
+  maskKeys: true               # Mask API keys in logs
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Preload Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+preload:
+  enabled: true                # Send warmup requests on startup
+  models:                      # Models to preload
+    - "gpt-4o-mini"
+    - "claude-3-haiku"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# API Schemes
+# ═══════════════════════════════════════════════════════════════════════════════
+# Define which API endpoints to expose. The router can listen on multiple
+# API formats simultaneously and route them all appropriately.
+
+schemes:
+  # Anthropic Messages API format
+  - id: anthropic
+    path: "/v1/messages"
+    format: "anthropic"
+  
+  # OpenAI Chat Completions API format
+  - id: openai
+    path: "/v1/chat/completions"
+    format: "openai"
+  
+  # You can add more schemes for different paths if needed
+  # - id: openai_legacy
+  #   path: "/v1/completions"
+  #   format: "openai"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Provider Configurations
+# ═══════════════════════════════════════════════════════════════════════════════
+# Define upstream providers. Built-in providers have sensible defaults,
+# you only need to specify what you want to override.
+#
+# Built-in providers (with default baseUrl):
+#   - openai:      https://api.openai.com/v1
+#   - anthropic:   https://api.anthropic.com
+#   - google:      https://generativelanguage.googleapis.com/v1beta
+#   - ollama:      http://localhost:11434
+#   - lmstudio:    http://localhost:1234/v1
+#   - llamacpp:    http://localhost:8080/v1
+#   - vllm:        http://localhost:8000/v1
+#   - fireworks:   https://api.fireworks.ai/inference/v1
+#   - together:    https://api.together.xyz/v1
+#   - groq:        https://api.groq.com/openai/v1
+#   - perplexity:  https://api.perplexity.ai
+#   - anyscale:    https://api.endpoints.anyscale.com/v1
+#   - deepseek:    https://api.deepseek.com
+#   - mistral:     https://api.mistral.ai/v1
+#   - cohere:      https://api.cohere.ai/v1
+#   - openrouter:  https://openrouter.ai/api/v1
+
+providers:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Cloud Providers - Using YAML Anchors for shared settings
+  # ═══════════════════════════════════════════════════════════════════════════
+  
+  # OpenAI - API key from environment
+  openai:
+    # apiKeyEnv: "OPENAI_API_KEY"  # Already the default
+    timeout: 180
+  
+  # Anthropic - with explicit API key
+  anthropic:
+    # apiKey: "sk-ant-..."  # Or use apiKeyEnv (default: ANTHROPIC_API_KEY)
+    timeout: 180
+  
+  # Groq - Fast inference
+  groq:
+    # apiKeyEnv: "GROQ_API_KEY"
+    timeout: 60  # Groq is fast!
+  
+  # Together AI
+  together:
+    # apiKeyEnv: "TOGETHER_API_KEY"
+    timeout: 180
+  
+  # Fireworks AI
+  fireworks:
+    # apiKeyEnv: "FIREWORKS_API_KEY"
+    timeout: 180
+  
+  # DeepSeek
+  deepseek:
+    # apiKeyEnv: "DEEPSEEK_API_KEY"
+    timeout: 180
+  
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Local Providers - No API key needed
+  # ═══════════════════════════════════════════════════════════════════════════
+  
+  # Ollama - local models
+  ollama:
+    baseUrl: "http://localhost:11434"
+    timeout: 300  # Local models can be slower
+  
+  # LM Studio - with custom port
+  lmstudio:
+    baseUrl: "http://localhost:1234/v1"
+    timeout: 300
+  
+  # llama.cpp server
+  llamacpp:
+    baseUrl: "http://localhost:8080/v1"
+    timeout: 300
+  
+  # vLLM - for high-throughput serving
+  vllm:
+    baseUrl: "http://localhost:8000/v1"
+    timeout: 300
+  
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Custom Provider Example
+  # ═══════════════════════════════════════════════════════════════════════════
+  
+  # My custom OpenAI-compatible endpoint
+  # mycustom:
+  #   baseUrl: "https://api.mycustom.ai/v1"
+  #   apiKey: "my-api-key"
+  #   authHeader: "Authorization"
+  #   authPrefix: "Bearer "
+  #   headers:
+  #     X-Custom-Header: "value"
+  #   timeout: 120
+  #   supportsStreaming: true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Routing Rules
+# ═══════════════════════════════════════════════════════════════════════════════
+# Define how model names are mapped to providers.
+#
+# Pattern matching supports:
+#   - *     matches any sequence of characters
+#   - ?     matches any single character
+#   - Exact matches take precedence over wildcards
+#
+# Routes are checked in priority order (higher priority = checked first).
+# Within the same priority, first match wins.
+
+routes:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # High Priority - Exact Matches and Specific Patterns
+  # ═══════════════════════════════════════════════════════════════════════════
+  
+  # Claude models → Anthropic (passthrough)
+  - pattern: "claude-3-opus*"
+    provider: anthropic
+    priority: 100
+  
+  - pattern: "claude-3-sonnet*"
+    provider: anthropic
+    priority: 100
+  
+  - pattern: "claude-3-haiku*"
+    provider: anthropic
+    priority: 100
+  
+  - pattern: "claude-3-5-sonnet*"
+    provider: anthropic
+    priority: 100
+  
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Local Models - Route to Ollama/LM Studio
+  # ═══════════════════════════════════════════════════════════════════════════
+  
+  # Local models with "local/" prefix
+  - pattern: "local/*"
+    provider: ollama
+    model: "${1}"  # Use capture group from pattern
+    priority: 90
+  
+  # Ollama-specific model names
+  - pattern: "llama2*"
+    provider: ollama
+    priority: 80
+  
+  - pattern: "mistral*"
+    provider: ollama
+    priority: 80
+  
+  - pattern: "codellama*"
+    provider: ollama
+    priority: 80
+  
+  - pattern: "phi*"
+    provider: ollama
+    priority: 80
+  
+  - pattern: "gemma*"
+    provider: ollama
+    priority: 80
+  
+  # LM Studio models
+  - pattern: "lmstudio/*"
+    provider: lmstudio
+    model: "${1}"
+    priority: 80
+  
+  # ═══════════════════════════════════════════════════════════════════════════
+  # OpenAI Models - Route to OpenAI
+  # ═══════════════════════════════════════════════════════════════════════════
+  
+  - pattern: "gpt-4*"
+    provider: openai
+    priority: 70
+  
+  - pattern: "gpt-3.5*"
+    provider: openai
+    priority: 70
+  
+  - pattern: "o1*"
+    provider: openai
+    priority: 70
+  
+  - pattern: "o3*"
+    provider: openai
+    priority: 70
+  
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Other Cloud Providers
+  # ═══════════════════════════════════════════════════════════════════════════
+  
+  # Groq models (they have their own naming)
+  - pattern: "llama-3*groq*"
+    provider: groq
+    model: "llama-3.1-70b-versatile"  # Map to specific Groq model
+    priority: 60
+  
+  - pattern: "mixtral-8x7b*"
+    provider: groq
+    priority: 60
+  
+  - pattern: "gemma-7b*"
+    provider: groq
+    priority: 60
+  
+  # Together AI models
+  - pattern: "together/*"
+    provider: together
+    model: "${1}"
+    priority: 50
+  
+  # Fireworks models
+  - pattern: "fireworks/*"
+    provider: fireworks
+    model: "${1}"
+    priority: 50
+  
+  # DeepSeek models
+  - pattern: "deepseek*"
+    provider: deepseek
+    priority: 50
+  
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Generic Prefix-based Routing
+  # ═══════════════════════════════════════════════════════════════════════════
+  
+  # Provider prefixes
+  - pattern: "openai/*"
+    provider: openai
+    model: "${1}"
+    priority: 40
+  
+  - pattern: "anthropic/*"
+    provider: anthropic
+    model: "${1}"
+    priority: 40
+  
+  - pattern: "groq/*"
+    provider: groq
+    model: "${1}"
+    priority: 40
+  
+  - pattern: "ollama/*"
+    provider: ollama
+    model: "${1}"
+    priority: 40
+  
+  - pattern: "vllm/*"
+    provider: vllm
+    model: "${1}"
+    priority: 40
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Default Provider
+# ═══════════════════════════════════════════════════════════════════════════════
+# If no route matches, use this provider.
+
+defaultProvider: openai
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ADVANCED EXAMPLE: Multi-Region/Key Setup with Anchors
+# ═══════════════════════════════════════════════════════════════════════════════
+# Uncomment and adapt this section for advanced use cases:
+
+# providers:
+#   # Base settings for OpenAI (anchor)
+#   openai: &openai-base
+#     baseUrl: "https://api.openai.com/v1"
+#     apiKeyEnv: "OPENAI_API_KEY"
+#     timeout: 180
+#   
+#   # Azure OpenAI with different settings
+#   openai-azure:
+#     <<: *openai-base  # Inherit from openai
+#     baseUrl: "https://myaccount.openai.azure.com/openai/deployments"
+#     apiKeyEnv: "AZURE_OPENAI_KEY"
+#     headers:
+#       "api-key": "${AZURE_OPENAI_KEY}"
+#   
+#   # Backup OpenAI with different key
+#   openai-backup:
+#     <<: *openai-base
+#     apiKeyEnv: "OPENAI_BACKUP_KEY"
+#   
+#   # Custom provider with all settings
+#   my-custom-endpoint:
+#     baseUrl: "https://llm.mycompany.com/v1"
+#     apiKey: "${COMPANY_API_KEY}"
+#     authHeader: "X-API-Key"
+#     authPrefix: ""
+#     timeout: 300
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ADVANCED EXAMPLE: Fallback Routing with Priority
+# ═══════════════════════════════════════════════════════════════════════════════
+# Uncomment for fallback routing:
+
+# routes:
+#   # Try primary provider first
+#   - pattern: "gpt-4*"
+#     provider: openai
+#     priority: 100
+#   
+#   # Fallback to Azure if needed (client can retry with same model name)
+#   # Note: This requires client-side retry logic
+#   
+#   # Route specific models to specific providers
+#   - pattern: "gpt-4-turbo"
+#     provider: openai-azure
+#     model: "gpt-4-turbo-deployment"
+#     priority: 100
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# USAGE EXAMPLES
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Once configured, use the router like this:
+#
+# 1. Anthropic API format:
+#    curl http://localhost:3000/v1/messages \
+#      -H "x-api-key: dummy" \
+#      -H "content-type: application/json" \
+#      -d '{
+#        "model": "claude-3-opus-20240229",
+#        "max_tokens": 1024,
+#        "messages": [{"role": "user", "content": "Hello!"}]
+#      }'
+#    # Routes to Anthropic API
+#
+# 2. OpenAI API format:
+#    curl http://localhost:3000/v1/chat/completions \
+#      -H "authorization: Bearer dummy" \
+#      -H "content-type: application/json" \
+#      -d '{
+#        "model": "gpt-4o",
+#        "messages": [{"role": "user", "content": "Hello!"}]
+#      }'
+#    # Routes to OpenAI API
+#
+# 3. Local model via Ollama:
+#    curl http://localhost:3000/v1/chat/completions \
+#      -H "authorization: Bearer dummy" \
+#      -d '{
+#        "model": "llama2:13b",
+#        "messages": [{"role": "user", "content": "Hello!"}]
+#      }'
+#    # Routes to local Ollama instance
+#
+# 4. Using provider prefix:
+#    curl http://localhost:3000/v1/chat/completions \
+#      -H "authorization: Bearer dummy" \
+#      -d '{
+#        "model": "groq/llama-3.1-70b",
+#        "messages": [{"role": "user", "content": "Hello!"}]
+#      }'
+#    # Routes to Groq

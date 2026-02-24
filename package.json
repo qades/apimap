@@ -1,18 +1,35 @@
 {
-  "name": "anthropic-router",
+  "name": "universal-model-router",
+  "version": "2.0.0",
+  "description": "The ultimate AI model router - route requests between OpenAI, Anthropic, local models, and more",
   "module": "index.ts",
   "type": "module",
   "private": true,
   "bin": {
-    "anthropic-router": "./index.ts"
+    "model-router": "./index.ts"
   },
   "scripts": {
-    "start": "bun run index.ts"
+    "start": "bun run index.ts",
+    "dev": "bun --hot run index.ts"
   },
+  "keywords": [
+    "openai",
+    "anthropic",
+    "ollama",
+    "llm",
+    "router",
+    "proxy",
+    "gateway",
+    "ai",
+    "model"
+  ],
   "devDependencies": {
     "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "dependencies": {
+    "yaml": "^2.8.2"
   }
 }
