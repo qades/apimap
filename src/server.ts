@@ -987,9 +987,13 @@ ${Object.entries(config.providers)
   .map(([id, p]) => `║    - ${id.padEnd(15)} → ${p.baseUrl.slice(0, 32).padEnd(32)}║`)
   .join("\n")}
 ╠════════════════════════════════════════════════════════════════╣
-║  Routes:                                                       ║
+║  Routes (pattern → provider → target model):                  ║
 ${config.routes
-  .map(r => `║    ${r.pattern.padEnd(20)} → ${r.provider.padEnd(15)} (pri:${r.priority || 0})  ║`)
+  .map(r => {
+    const modelInfo = r.model || "(as-is)";
+    const line = `║    ${r.pattern} → ${r.provider}:${modelInfo} (pri:${r.priority || 0})`;
+    return line.slice(0, 64).padEnd(64) + "║";
+  })
   .join("\n")}
 ${config.defaultProvider ? `║  Default: ${config.defaultProvider.padEnd(54)}║` : "║  Default: (none)".padEnd(65) + "║"}
 ╚════════════════════════════════════════════════════════════════╝
