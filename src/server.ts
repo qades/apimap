@@ -94,6 +94,23 @@ Examples:
 }
 
 // ============================================================================
+// Default Scheme Paths
+// ============================================================================
+
+const SCHEME_PATH_MAP: Record<string, string> = {
+  "openai": "/v1/chat/completions",
+  "openai-chat": "/v1/chat/completions",
+  "anthropic": "/v1/messages",
+  "anthropic-messages": "/v1/messages",
+  "openai-responses": "/v1/responses",
+  "openai-completions": "/v1/completions",
+};
+
+function getSchemePath(scheme: { id: string; path?: string; format: string }): string {
+  return scheme.path || SCHEME_PATH_MAP[scheme.id] || SCHEME_PATH_MAP[scheme.format] || `/${scheme.id}`;
+}
+
+// ============================================================================
 // Utility Functions
 // ============================================================================
 
@@ -163,21 +180,8 @@ async function handleRequest(
   const url = new URL(req.url);
   const config = state.config.getConfig();
   
-  // Find matching scheme by deriving path from scheme ID
-  // Map scheme IDs to their standard endpoint paths
-  const schemePathMap: Record<string, string> = {
-    "openai": "/v1/chat/completions",
-    "openai-chat": "/v1/chat/completions",
-    "anthropic": "/v1/messages",
-    "anthropic-messages": "/v1/messages",
-    "openai-responses": "/v1/responses",
-    "openai-completions": "/v1/completions",
-  };
-  
-  const scheme = config.schemes?.find(s => {
-    const schemePath = schemePathMap[s.id] || schemePathMap[s.format] || `/${s.id}`;
-    return url.pathname === schemePath;
-  });
+  // Find matching scheme by path (explicit or derived from format)
+  const scheme = config.schemes?.find(s => url.pathname === getSchemePath(s));
   
   if (!scheme || req.method !== "POST") {
     return jsonResponse({ error: "Not found" }, 404, config, req.headers.get("origin"));
@@ -204,8 +208,7 @@ async function handleRequest(
   const authHeader = req.headers.get("authorization") || req.headers.get("x-api-key") || "";
   const apiKey = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
 
-  // Derive endpoint path for metadata
-  const endpointPath = schemePathMap[scheme.id] || schemePathMap[scheme.format] || `/${scheme.id}`;
+  const endpointPath = getSchemePath(scheme);
   
   // Create internal request
   const internalReq = transformers.parseRequest(scheme.format as transformers.ProviderFormat, body, {
@@ -461,72 +464,77 @@ async function createStreamingResponse(
 
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
+  const isAnthropicSource = sourceFormat === "anthropic" || sourceFormat === "anthropic-messages";
+
   let buffer = "";
   let chunkIndex = 0;
   let outputTokens = 0;
   let finalStopReason: string | null = null;
-  const chunks: string[] = [];
+  let sentStart = false;
 
-  // Add stream start for Anthropic format
-  if (sourceFormat === "anthropic") {
-    chunks.push(transformers.createStreamStart("anthropic", `msg_${Date.now()}`));
-  }
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const writer = writable.getWriter();
 
-  return new ReadableStream({
-    async pull(controller) {
-      try {
+  // Process the upstream stream asynchronously
+  (async () => {
+    try {
+      // Send stream start for Anthropic format
+      if (isAnthropicSource) {
+        await writer.write(encoder.encode(
+          transformers.createStreamStart("anthropic", `msg_${Date.now()}`)
+        ));
+      }
+
+      while (true) {
         const { done, value } = await reader.read();
-        
-        if (done) {
-          // Stream complete
-          if (sourceFormat === "anthropic") {
-            controller.enqueue(encoder.encode(
-              transformers.createStreamStop("anthropic", finalStopReason, outputTokens)
-            ));
-          } else {
-            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          }
-          
-          // Log completion
-          logEntry.responseBody = { type: "streaming", chunkCount: chunkIndex };
-          logEntry.durationMs = Date.now() - startTime;
-          state.logging.log(logEntry).catch(console.error);
-          
-          controller.close();
-          return;
-        }
+        if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
+        let streamComplete = false;
         for (const line of lines) {
           const chunk = transformers.parseStreamChunk(targetFormat, line);
           if (!chunk) continue;
 
           if (chunk.isComplete) {
-            finalStopReason = chunk.finishReason ?? null;
-            if (chunk.usage) {
-              outputTokens = chunk.usage.completionTokens;
-            }
+            if (chunk.finishReason) finalStopReason = chunk.finishReason;
+            if (chunk.usage) outputTokens = chunk.usage.completionTokens;
+            streamComplete = true;
           } else {
             chunkIndex++;
-            if (chunk.usage) {
-              outputTokens = chunk.usage.completionTokens;
-            }
-            
+            if (chunk.usage) outputTokens = chunk.usage.completionTokens;
             const outputLine = transformers.toProviderStreamChunk(sourceFormat, chunk, model);
-            controller.enqueue(encoder.encode(outputLine));
+            await writer.write(encoder.encode(outputLine));
           }
         }
-      } catch (error) {
-        controller.error(error);
+
+        if (streamComplete) break;
       }
-    },
-    cancel() {
-      reader.releaseLock();
-    },
-  });
+
+      // Send stream end
+      if (isAnthropicSource) {
+        const mappedReason = transformers.mapStopReason("openai", "anthropic", finalStopReason);
+        await writer.write(encoder.encode(
+          transformers.createStreamStop("anthropic", mappedReason, outputTokens)
+        ));
+      } else {
+        await writer.write(encoder.encode("data: [DONE]\n\n"));
+      }
+
+      logEntry.responseBody = { type: "streaming", chunkCount: chunkIndex };
+      logEntry.durationMs = Date.now() - startTime;
+      state.logging.log(logEntry).catch(console.error);
+    } catch (error) {
+      console.error(`[stream] error:`, error);
+    } finally {
+      reader.cancel().catch(() => {});
+      await writer.close().catch(() => {});
+    }
+  })();
+
+  return readable;
 }
 
 function jsonResponse(data: unknown, status: number, config: RouterConfig, origin: string | null): Response {
@@ -985,6 +993,13 @@ ${config.routes
 ${config.defaultProvider ? `║  Default: ${config.defaultProvider.padEnd(54)}║` : "║  Default: (none)".padEnd(65) + "║"}
 ╚════════════════════════════════════════════════════════════════╝
 `);
+
+  // Print supported endpoints
+  console.log("Supported endpoints:");
+  config.schemes?.forEach(s => {
+    console.log(`  POST http://${host}:${apiPort}${getSchemePath(s)} (${s.format})`);
+  });
+  console.log(`\nHealth check: http://${host}:${apiPort}/health`);
 
   // Start API server
   server = Bun.serve({

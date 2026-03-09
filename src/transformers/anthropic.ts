@@ -373,7 +373,7 @@ export function createAnthropicStreamEvent(
   type: string,
   data: Record<string, unknown>
 ): string {
-  return `data: ${JSON.stringify({ type, ...data })}\n\n`;
+  return `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
 }
 
 /**
@@ -530,7 +530,7 @@ export function createAnthropicStreamStop(
     usage: { output_tokens: outputTokens },
   }));
   
-  lines.push("data: [DONE]\n\n");
+  lines.push(createAnthropicStreamEvent("message_stop", {}));
 
   return lines.join("");
 }

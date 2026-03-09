@@ -344,7 +344,7 @@ describe("Anthropic Transformer", () => {
       expect(stop).toContain("content_block_stop");
       expect(stop).toContain("message_delta");
       expect(stop).toContain("end_turn");
-      expect(stop).toContain("[DONE]");
+      expect(stop).toContain("message_stop");
     });
   });
 });

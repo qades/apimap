@@ -194,7 +194,7 @@ describe("Transformer Registry", () => {
     test("should create Anthropic stream stop", () => {
       const stop = createStreamStop("anthropic", "end_turn", 50);
       expect(stop).toContain("message_delta");
-      expect(stop).toContain("[DONE]");
+      expect(stop).toContain("message_stop");
     });
 
     test("should create OpenAI stream stop", () => {
