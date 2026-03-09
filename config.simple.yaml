@@ -19,11 +19,9 @@ preload:
 # API endpoints to expose
 schemes:
   - id: anthropic
-    path: "/v1/messages"
-    format: "anthropic"
+    format: "anthropic-messages"
   - id: openai
-    path: "/v1/chat/completions"
-    format: "openai"
+    format: "openai-chat"
 
 # Provider configurations (API keys from environment by default)
 providers:
@@ -45,21 +43,17 @@ routes:
   # Claude models → Anthropic API
   - pattern: "claude-*"
     provider: anthropic
-    priority: 100
   
   # GPT models → OpenAI API
   - pattern: "gpt-*"
     provider: openai
-    priority: 90
   
   # Local Ollama models
   - pattern: "llama*"
     provider: ollama
-    priority: 80
   
   - pattern: "mistral*"
     provider: ollama
-    priority: 80
 
 # Default provider for unmatched models
 defaultProvider: openai

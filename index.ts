@@ -26,6 +26,8 @@ interface ProviderConfig {
   timeout?: number;
   /** Whether this provider supports streaming */
   supportsStreaming?: boolean;
+  /** Provider format for the API */
+  format?: string;
 }
 
 interface RouteConfig {
@@ -1405,9 +1407,10 @@ async function handleAnthropicPassthrough(
 async function handleOpenAIRequest(
   req: Request,
   requestId: string,
-  startTime: number
+  startTime: number,
+  preParsedBody?: any
 ): Promise<Response> {
-  const body = await req.json();
+  const body = preParsedBody || await req.json();
   const model = body.model;
 
   if (!model) {
@@ -1596,6 +1599,582 @@ async function preloadModels() {
 }
 
 // ============================================================================
+// Admin API State
+// ============================================================================
+
+interface UnroutedRequest {
+  id: string;
+  timestamp: string;
+  model: string;
+  apiKey: string;
+  streaming: boolean;
+  endpoint: string;
+  fullRequest: unknown;
+  headers: Record<string, string>;
+}
+
+const unroutedRequests: UnroutedRequest[] = [];
+let totalRequests = 0;
+let routedRequests = 0;
+let unroutedRequestCount = 0;
+let totalLatency = 0;
+let requestCountForAvg = 0;
+const MAX_UNROUTED_STORED = 100;
+
+function addUnroutedRequest(req: UnroutedRequest) {
+  unroutedRequests.unshift(req);
+  if (unroutedRequests.length > MAX_UNROUTED_STORED) {
+    unroutedRequests.pop();
+  }
+  unroutedRequestCount++;
+}
+
+function recordRoutedRequest(durationMs: number) {
+  routedRequests++;
+  totalLatency += durationMs;
+  requestCountForAvg++;
+}
+
+function recordUnroutedRequest(model: string, endpoint: string, originalReq: Request, body: unknown) {
+  const authHeader = originalReq.headers.get("authorization") || originalReq.headers.get("x-api-key") || "";
+  addUnroutedRequest({
+    id: generateRequestId(),
+    timestamp: new Date().toISOString(),
+    model,
+    apiKey: authHeader.slice(0, 20) + "...",
+    streaming: (body as any)?.stream ?? false,
+    endpoint,
+    fullRequest: body,
+    headers: Object.fromEntries(originalReq.headers.entries()),
+  });
+}
+
+// Admin API Handlers
+// ============================================================================
+
+async function handleAdminRequest(req: Request, url: URL, corsHeaders: Record<string, string>): Promise<Response | null> {
+  const path = url.pathname;
+  
+  if (!path.startsWith("/api/admin")) {
+    return null;
+  }
+
+  // GET /api/admin/status
+  if (path === "/api/admin/status" && req.method === "GET") {
+    return new Response(
+      JSON.stringify({
+        status: "ok",
+        version: "2.0.0",
+        uptime: process.uptime(),
+        configPath: CONFIG_PATH,
+        providers: Object.keys(CONFIG.providers),
+        routes: CONFIG.routes.length,
+        totalRequests,
+        routedRequests,
+        unroutedRequests: unroutedRequestCount,
+        errors: 0,
+        averageLatency: requestCountForAvg > 0 ? Math.round(totalLatency / requestCountForAvg) : 0,
+      }),
+      { headers: { "Content-Type": "application/json", ...corsHeaders } }
+    );
+  }
+
+  // GET /api/admin/providers
+  if (path === "/api/admin/providers" && req.method === "GET") {
+    const registered = Object.entries(CONFIG.providers).map(([id, config]) => ({
+      id,
+      ...config,
+      configured: !!(config.apiKey || (config.apiKeyEnv && process.env[config.apiKeyEnv])),
+    }));
+    
+    return new Response(
+      JSON.stringify({ registered, builtin: Object.keys(DEFAULT_PROVIDERS) }),
+      { headers: { "Content-Type": "application/json", ...corsHeaders } }
+    );
+  }
+
+  // PUT /api/admin/providers
+  if (path === "/api/admin/providers" && req.method === "PUT") {
+    const body = await req.json();
+    if (body.providers) {
+      CONFIG.providers = { ...CONFIG.providers, ...body.providers };
+      await saveConfig();
+    }
+    return new Response(JSON.stringify({ success: true }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
+  }
+
+  // GET /api/admin/routes
+  if (path === "/api/admin/routes" && req.method === "GET") {
+    return new Response(
+      JSON.stringify({ routes: CONFIG.routes }),
+      { headers: { "Content-Type": "application/json", ...corsHeaders } }
+    );
+  }
+
+  // PUT /api/admin/routes
+  if (path === "/api/admin/routes" && req.method === "PUT") {
+    const body = await req.json();
+    if (body.routes) {
+      CONFIG.routes = body.routes.sort((a: RouteConfig, b: RouteConfig) => (b.priority || 0) - (a.priority || 0));
+      await saveConfig();
+    }
+    return new Response(JSON.stringify({ success: true }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
+  }
+
+  // POST /api/admin/routes (add single)
+  if (path === "/api/admin/routes" && req.method === "POST") {
+    const body = await req.json();
+    CONFIG.routes.push(body);
+    CONFIG.routes.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+    await saveConfig();
+    return new Response(JSON.stringify({ success: true }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
+  }
+
+  // GET /api/admin/schemes
+  if (path === "/api/admin/schemes" && req.method === "GET") {
+    return new Response(
+      JSON.stringify({ schemes: CONFIG.schemes }),
+      { headers: { "Content-Type": "application/json", ...corsHeaders } }
+    );
+  }
+
+  // PUT /api/admin/schemes
+  if (path === "/api/admin/schemes" && req.method === "PUT") {
+    const body = await req.json();
+    if (body.schemes) {
+      CONFIG.schemes = body.schemes;
+      await saveConfig();
+    }
+    return new Response(JSON.stringify({ success: true }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
+  }
+
+  // GET /api/admin/config
+  if (path === "/api/admin/config" && req.method === "GET") {
+    return new Response(
+      JSON.stringify(CONFIG),
+      { headers: { "Content-Type": "application/json", ...corsHeaders } }
+    );
+  }
+
+  // POST /api/admin/config
+  if (path === "/api/admin/config" && req.method === "POST") {
+    const body = await req.json();
+    // Merge with existing config
+    Object.assign(CONFIG, body);
+    await saveConfig();
+    return new Response(JSON.stringify({ success: true }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
+  }
+
+  // GET /api/admin/default-provider
+  if (path === "/api/admin/default-provider" && req.method === "GET") {
+    return new Response(
+      JSON.stringify({ defaultProvider: CONFIG.defaultProvider }),
+      { headers: { "Content-Type": "application/json", ...corsHeaders } }
+    );
+  }
+
+  // PUT /api/admin/default-provider
+  if (path === "/api/admin/default-provider" && req.method === "PUT") {
+    const body = await req.json();
+    CONFIG.defaultProvider = body.defaultProvider;
+    await saveConfig();
+    return new Response(JSON.stringify({ success: true }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
+  }
+
+  // GET /api/admin/unrouted
+  if (path === "/api/admin/unrouted" && req.method === "GET") {
+    return new Response(
+      JSON.stringify({ unrouted: unroutedRequests }),
+      { headers: { "Content-Type": "application/json", ...corsHeaders } }
+    );
+  }
+
+  // DELETE /api/admin/unrouted
+  if (path === "/api/admin/unrouted" && req.method === "DELETE") {
+    unroutedRequests.length = 0;
+    return new Response(JSON.stringify({ success: true }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
+  }
+
+  // GET /api/admin/backups
+  if (path === "/api/admin/backups" && req.method === "GET") {
+    const backups = await listBackups();
+    return new Response(
+      JSON.stringify({ backups }),
+      { headers: { "Content-Type": "application/json", ...corsHeaders } }
+    );
+  }
+
+  // POST /api/admin/backups (create)
+  if (path === "/api/admin/backups" && req.method === "POST") {
+    const backup = await createBackup();
+    return new Response(JSON.stringify({ backup }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
+  }
+
+  // POST /api/admin/backups/:filename (restore)
+  if (path.startsWith("/api/admin/backups/") && req.method === "POST") {
+    const filename = decodeURIComponent(path.slice("/api/admin/backups/".length));
+    const success = await restoreBackup(filename);
+    return new Response(JSON.stringify({ success }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
+  }
+
+  // DELETE /api/admin/backups/:filename
+  if (path.startsWith("/api/admin/backups/") && req.method === "DELETE") {
+    const filename = decodeURIComponent(path.slice("/api/admin/backups/".length));
+    const backupPath = join("config/backups", filename);
+    try {
+      await Bun.file(backupPath).delete();
+      return new Response(JSON.stringify({ success: true }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
+    } catch {
+      return new Response(JSON.stringify({ success: false, error: "Backup not found" }), { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } });
+    }
+  }
+
+  // GET /api/admin/logs
+  if (path === "/api/admin/logs" && req.method === "GET") {
+    const logs = await getRecentLogs(parseInt(url.searchParams.get("limit") || "50"));
+    return new Response(
+      JSON.stringify({ logs }),
+      { headers: { "Content-Type": "application/json", ...corsHeaders } }
+    );
+  }
+
+  // POST /api/admin/test-model (new endpoint for testing models)
+  if (path === "/api/admin/test-model" && req.method === "POST") {
+    return await handleModelTest(req, corsHeaders);
+  }
+
+  // Return 404 for unknown admin paths
+  return new Response(
+    JSON.stringify({ error: "Admin endpoint not found", path }),
+    { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } }
+  );
+}
+
+// Backup management
+async function listBackups(): Promise<Array<{ filename: string; path: string; createdAt: string; size: number }>> {
+  const backupDir = "config/backups";
+  if (!existsSync(backupDir)) return [];
+  
+  const backups: Array<{ filename: string; path: string; createdAt: string; size: number }> = [];
+  
+  try {
+    const files = await Array.fromAsync(new Bun.Glob("*.yaml").scan(backupDir));
+    for (const filename of files) {
+      const filePath = join(backupDir, filename);
+      const stat = await Bun.file(filePath).stat();
+      if (stat) {
+        backups.push({
+          filename,
+          path: filePath,
+          createdAt: stat.birthtime.toISOString(),
+          size: stat.size,
+        });
+      }
+    }
+  } catch {
+    // Ignore errors
+  }
+  
+  return backups.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+async function createBackup(): Promise<{ filename: string; path: string; createdAt: string; size: number }> {
+  const backupDir = "config/backups";
+  if (!existsSync(backupDir)) {
+    await mkdir(backupDir, { recursive: true });
+  }
+  
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filename = `config-backup-${timestamp}.yaml`;
+  const filePath = join(backupDir, filename);
+  
+  const YAML = await import("yaml");
+  const content = YAML.stringify(CONFIG);
+  await writeFile(filePath, content);
+  
+  const stat = await Bun.file(filePath).stat();
+  return {
+    filename,
+    path: filePath,
+    createdAt: new Date().toISOString(),
+    size: stat?.size || 0,
+  };
+}
+
+async function restoreBackup(filename: string): Promise<boolean> {
+  const backupPath = join("config/backups", filename);
+  if (!existsSync(backupPath)) return false;
+  
+  try {
+    const file = Bun.file(backupPath);
+    const content = await file.text();
+    const YAML = await import("yaml");
+    const parsed = YAML.parse(content);
+    
+    // Validate basic structure
+    if (!parsed.providers || !parsed.routes) {
+      return false;
+    }
+    
+    CONFIG = {
+      ...CONFIG,
+      ...parsed,
+      server: { ...CONFIG.server, ...parsed.server },
+      logging: { ...CONFIG.logging, ...parsed.logging },
+    };
+    
+    await saveConfig();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getRecentLogs(limit: number): Promise<LogEntry[]> {
+  if (!CONFIG.logging?.dir || !existsSync(CONFIG.logging.dir)) {
+    return [];
+  }
+  
+  const logs: LogEntry[] = [];
+  try {
+    const files = await Array.fromAsync(new Bun.Glob("*.json").scan(CONFIG.logging.dir));
+    const sortedFiles = files
+      .map(f => join(CONFIG.logging!.dir!, f))
+      .sort()
+      .reverse()
+      .slice(0, limit);
+    
+    for (const filePath of sortedFiles) {
+      try {
+        const content = await Bun.file(filePath).text();
+        logs.push(JSON.parse(content));
+      } catch {
+        // Skip invalid files
+      }
+    }
+  } catch {
+    // Ignore errors
+  }
+  
+  return logs;
+}
+
+async function saveConfig(): Promise<void> {
+  if (!CONFIG_PATH) return;
+  
+  const YAML = await import("yaml");
+  const content = YAML.stringify(CONFIG);
+  await writeFile(CONFIG_PATH, content);
+}
+
+// Models List Handler
+async function handleModelsEndpoint(corsHeaders: Record<string, string>): Promise<Response> {
+  // Build list of available models from routes
+  const models = CONFIG.routes.map((route, index) => {
+    // Create a model ID from the pattern
+    const id = route.pattern.replace(/[\*\?]/g, "");
+    return {
+      id: id || `model-${index}`,
+      object: "model",
+      created: Math.floor(Date.now() / 1000),
+      owned_by: route.provider,
+    };
+  });
+
+  // Also add some common examples based on patterns
+  const examples: Array<{ id: string; object: string; created: number; owned_by: string }> = [];
+  for (const route of CONFIG.routes) {
+    if (route.pattern.includes("gpt-4")) {
+      examples.push(
+        { id: "gpt-4o", object: "model", created: Math.floor(Date.now() / 1000), owned_by: route.provider },
+        { id: "gpt-4o-mini", object: "model", created: Math.floor(Date.now() / 1000), owned_by: route.provider },
+        { id: "gpt-4-turbo", object: "model", created: Math.floor(Date.now() / 1000), owned_by: route.provider }
+      );
+    } else if (route.pattern.includes("claude")) {
+      examples.push(
+        { id: "claude-3-opus-20240229", object: "model", created: Math.floor(Date.now() / 1000), owned_by: route.provider },
+        { id: "claude-3-sonnet-20240229", object: "model", created: Math.floor(Date.now() / 1000), owned_by: route.provider },
+        { id: "claude-3-haiku-20240307", object: "model", created: Math.floor(Date.now() / 1000), owned_by: route.provider }
+      );
+    }
+  }
+
+  const allModels = [...examples, ...models];
+  
+  // Deduplicate by ID
+  const seen = new Set<string>();
+  const uniqueModels = allModels.filter(m => {
+    if (seen.has(m.id)) return false;
+    seen.add(m.id);
+    return true;
+  });
+
+  return new Response(
+    JSON.stringify({
+      object: "list",
+      data: uniqueModels,
+    }),
+    { headers: { "Content-Type": "application/json", ...corsHeaders } }
+  );
+}
+
+// Model Testing Handler
+async function handleModelTest(req: Request, corsHeaders: Record<string, string>): Promise<Response> {
+  try {
+    const body = await req.json();
+    const { model, message, systemMessage, temperature = 0.7, maxTokens = 1024, stream = false, apiFormat = "openai", endpoint: endpointPath } = body;
+
+    if (!model || !message) {
+      return new Response(
+        JSON.stringify({ error: "Missing required fields: model and message" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    const route = findRoute(model);
+    if (!route) {
+      return new Response(
+        JSON.stringify({ error: "No route found for model", model }),
+        { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    const provider = CONFIG.providers[route.provider];
+    if (!provider) {
+      return new Response(
+        JSON.stringify({ error: "Unknown provider", provider: route.provider }),
+        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    const apiKey = provider.apiKey || (provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : undefined);
+    
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(provider.authHeader && apiKey
+        ? { [provider.authHeader]: `${provider.authPrefix || ""}${apiKey}` }
+        : {}),
+      ...provider.headers,
+    };
+
+    // Build request based on API format
+    let requestBody: unknown;
+    let endpoint: string;
+    
+    // Use the entered model name, falling back to route.model if needed
+    const targetModel = model.trim();
+    
+    // Determine endpoint path - use provided path or default based on format
+    const path = endpointPath || (apiFormat === "anthropic" ? "/v1/messages" : "/chat/completions");
+    endpoint = `${provider.baseUrl}${path}`;
+    
+    if (apiFormat === "anthropic") {
+      requestBody = {
+        model: targetModel,
+        messages: [{ role: "user", content: message }],
+        max_tokens: maxTokens,
+        temperature,
+        stream,
+        ...(systemMessage ? { system: systemMessage } : {}),
+      };
+    } else {
+      const messages: Array<{ role: string; content: string }> = [];
+      if (systemMessage) {
+        messages.push({ role: "system", content: systemMessage });
+      }
+      messages.push({ role: "user", content: message });
+      
+      requestBody = {
+        model: targetModel,
+        messages,
+        max_tokens: maxTokens,
+        temperature,
+        stream,
+      };
+    }
+
+    const timeoutMs = (provider.timeout || CONFIG.server?.timeout || 120) * 1000;
+    const startTime = Date.now();
+    
+    const response = await fetchWithTimeout(
+      endpoint,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify(requestBody),
+      },
+      timeoutMs
+    );
+
+    const duration = Date.now() - startTime;
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return new Response(
+        JSON.stringify({ 
+          error: "Upstream error", 
+          details: errorText,
+          provider: route.provider,
+          targetModel: route.model,
+          duration,
+        }),
+        { status: response.status, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    // For streaming, return the raw stream
+    if (stream) {
+      return new Response(response.body, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "X-Provider": route.provider,
+          "X-Target-Model": route.model,
+          ...corsHeaders,
+        },
+      });
+    }
+
+    // For non-streaming, parse and return
+    const data = await response.json();
+    
+    // Extract content based on format
+    let content: string;
+    let usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    
+    if (apiFormat === "anthropic") {
+      content = data.content?.map((c: any) => c.text).join("") || "";
+      usage = {
+        prompt_tokens: data.usage?.input_tokens || 0,
+        completion_tokens: data.usage?.output_tokens || 0,
+        total_tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
+      };
+    } else {
+      content = data.choices?.[0]?.message?.content || "";
+      usage = data.usage || usage;
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        content,
+        usage,
+        provider: route.provider,
+        targetModel: route.model,
+        duration,
+        model: data.model || route.model,
+      }),
+      { headers: { "Content-Type": "application/json", ...corsHeaders } }
+    );
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return new Response(
+      JSON.stringify({ error: "Test failed", message: errorMessage }),
+      { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
+    );
+  }
+}
+
 // Main Server
 // ============================================================================
 
@@ -1690,6 +2269,17 @@ ${CONFIG.defaultProvider ? `║    (default)           → ${CONFIG.defaultProvi
         );
       }
 
+      // Handle admin API requests
+      const adminResponse = await handleAdminRequest(req, url, corsHeaders);
+      if (adminResponse) {
+        return adminResponse;
+      }
+
+      // Handle /v1/models endpoint (OpenAI compatible)
+      if (url.pathname === "/v1/models" && req.method === "GET") {
+        return await handleModelsEndpoint(corsHeaders);
+      }
+
       // Handle configured API paths
       const scheme = CONFIG.schemes?.find((s) => url.pathname === s.path);
 
@@ -1700,19 +2290,53 @@ ${CONFIG.defaultProvider ? `║    (default)           → ${CONFIG.defaultProvi
         });
       }
 
+      totalRequests++;
+
       try {
         let response: Response;
 
         if (scheme.format === "anthropic") {
           const body = await req.json();
+          const model = (body as AnthropicRequest).model;
+          
+          // Check if route exists
+          const route = findRoute(model);
+          if (!route) {
+            recordUnroutedRequest(model, url.pathname, req, body);
+            return new Response(
+              JSON.stringify({ error: "No route found for model", model }),
+              { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } }
+            );
+          }
+          
           response = await handleAnthropicRequest(req, body as AnthropicRequest, requestId, startTime);
         } else if (scheme.format === "openai" || scheme.format === "openai-compatible") {
-          response = await handleOpenAIRequest(req, requestId, startTime);
+          // Clone request to read body for route check
+          const bodyClone = req.clone();
+          const body = await bodyClone.json();
+          const model = body.model;
+          
+          // Check if route exists
+          const route = findRoute(model);
+          if (!route) {
+            recordUnroutedRequest(model, url.pathname, req, body);
+            return new Response(
+              JSON.stringify({ error: "No route found for model", model }),
+              { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } }
+            );
+          }
+          
+          response = await handleOpenAIRequest(req, requestId, startTime, body);
         } else {
           response = new Response(
             JSON.stringify({ error: "Unsupported scheme format", format: scheme.format }),
             { status: 400, headers: { "Content-Type": "application/json" } }
           );
+        }
+
+        // Track successful routing
+        if (response.status < 400) {
+          recordRoutedRequest(Date.now() - startTime);
         }
 
         // Add CORS headers to response

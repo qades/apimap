@@ -1,124 +1,136 @@
-# Universal Model Router
+# API Map - Universal Model Router
 
-The ultimate AI model router - a fast, lightweight gateway that routes requests between different LLM providers (OpenAI, Anthropic, local models, and more) with a unified configuration-driven approach. Built with Bun for maximum performance.
+A powerful AI model gateway that routes requests between OpenAI, Anthropic, local models (Ollama, LM Studio), and more. Features a modern SvelteKit GUI for easy configuration and request monitoring.
 
 ## Features
 
-- 🚀 **Fast**: Built with Bun's high-performance HTTP server
-- 🌐 **Multi-API**: Listen on both OpenAI and Anthropic API endpoints simultaneously
-- 🔄 **Universal Routing**: Route any model to any provider using pattern matching
-- 📋 **YAML Configuration**: Clean, maintainable config with anchors and aliases
-- 🏠 **Local LLM Support**: Ollama, LM Studio, llama.cpp, vLLM
-- ☁️ **Cloud Providers**: OpenAI, Anthropic, Groq, Together, Fireworks, DeepSeek, and more
-- 🔄 **Streaming**: Full SSE streaming support
-- 🛠️ **Tool Calls**: Complete tool use/call support
-- 🔑 **Flexible Auth**: Environment variables, request headers, or config-based keys
-- 📝 **Request Logging**: Detailed conversation logging
-- 🌐 **CORS Support**: Configurable CORS headers
-- ⏱️ **Timeouts**: Per-provider and global timeout configuration
-- 🔥 **Preload**: Warm up models on startup
-- 🧩 **Extensible**: Easy to add new providers and API schemes
+- **Multi-Provider Support**: Route requests to OpenAI, Anthropic, Google Gemini, Groq, Together AI, Fireworks, DeepSeek, Mistral, Cohere, OpenRouter, and local providers (Ollama, LM Studio, llama.cpp, vLLM)
+- **Protocol Bridging**: Use Anthropic's API format to call OpenAI-compatible providers and vice versa
+- **Pattern-Based Routing**: Wildcard patterns for flexible model matching (e.g., `gpt-4*` matches all GPT-4 variants)
+- **Real-Time Monitoring**: Web GUI shows unrouted requests, routing statistics, and request logs
+- **Configuration Management**: Visual editor for providers, routes, and YAML configuration with automatic backups
+- **Streaming Support**: Full support for streaming responses across all compatible providers
 
 ## Quick Start
 
-1. **Install dependencies**:
+### 1. Install Dependencies
+
 ```bash
 bun install
+cd gui && bun install && cd ..
 ```
 
-2. **Configure** (edit `config.yaml`):
-```yaml
-providers:
-  openai:
-    # Uses OPENAI_API_KEY env var by default
-  
-  anthropic:
-    # Uses ANTHROPIC_API_KEY env var by default
-  
-  ollama:
-    baseUrl: "http://localhost:11434"
+### 2. Configure
 
-routes:
-  - pattern: "claude-*"
-    provider: anthropic
-  
-  - pattern: "gpt-*"
-    provider: openai
-  
-  - pattern: "llama*"
-    provider: ollama
-
-defaultProvider: openai
-```
-
-3. **Run**:
-```bash
-bun run index.ts
-```
-
-## Installation
+Copy the example config and edit:
 
 ```bash
-# Clone or download the project
-cd universal-model-router
+mkdir -p config
+cp config.example.yaml config/config.yaml
+```
 
-# Install dependencies
-bun install
+Edit `config/config.yaml` to add your API keys and routes.
 
-# Copy example config
-cp config.example.yaml config.yaml
+### 3. Run
 
-# Edit config.yaml with your settings
+Start both the API server and GUI:
+
+```bash
+# Terminal 1: Start API server
+bun run dev
+
+# Terminal 2: Start GUI
+cd gui && bun run dev
+```
+
+Or use the combined start script:
+
+```bash
+bun run start:all
+```
+
+The API will be available at `http://localhost:3000` and the GUI at `http://localhost:3001`.
+
+## Project Structure
+
+```
+/home/mk/apimap/
+├── src/                          # Core source code
+│   ├── types/                    # TypeScript type definitions
+│   │   ├── index.ts              # Main types (config, requests, responses)
+│   │   └── internal.ts           # Internal message format
+│   ├── providers/                # Provider implementations
+│   │   ├── base.ts               # Base provider class
+│   │   ├── registry.ts           # Provider registry
+│   │   └── index.ts              # Module exports
+│   ├── transformers/             # Format transformers
+│   │   ├── openai.ts             # OpenAI format transformer
+│   │   ├── anthropic.ts          # Anthropic format transformer
+│   │   └── index.ts              # Transformer registry
+│   ├── config/                   # Configuration management
+│   │   └── manager.ts            # Config manager with backups
+│   ├── logging/                  # Logging system
+│   │   └── index.ts              # Request logging and unrouted capture
+│   ├── router/                   # Request routing
+│   │   └── index.ts              # Pattern matching and routing
+│   ├── server.ts                 # Main server entry
+│   └── index.ts                  # CLI entry point
+├── gui/                          # SvelteKit management GUI
+│   ├── src/
+│   │   ├── lib/
+│   │   │   ├── components/       # Svelte components
+│   │   │   ├── stores/           # Svelte stores
+│   │   │   └── utils/            # API client utilities
+│   │   ├── routes/               # SvelteKit routes
+│   │   ├── app.html
+│   │   └── app.css
+│   ├── static/
+│   ├── package.json
+│   ├── svelte.config.js
+│   └── vite.config.ts
+├── config/                       # Configuration files
+│   ├── config.yaml               # Active configuration
+│   └── backups/                  # Config backups
+├── logs/                         # Request logs
+├── package.json
+├── tsconfig.json
+└── README.md
 ```
 
 ## Configuration
 
-The router is configured via YAML files. See `config.example.yaml` for a comprehensive example.
-
-### Basic Configuration Structure
+### Basic Example
 
 ```yaml
 server:
   port: 3000
   host: "0.0.0.0"
-  cors:
-    origin: "*"
   timeout: 120
 
 logging:
   dir: "./logs"
   level: "info"
-
-preload:
-  enabled: true
-  models:
-    - "gpt-4o-mini"
-
-schemes:
-  - id: anthropic
-    path: "/v1/messages"
-    format: "anthropic"
-  
-  - id: openai
-    path: "/v1/chat/completions"
-    format: "openai"
+  maskKeys: true
 
 providers:
   openai:
+    apiKeyEnv: "OPENAI_API_KEY"
     timeout: 180
   
   anthropic:
     apiKeyEnv: "ANTHROPIC_API_KEY"
+    timeout: 180
   
   ollama:
     baseUrl: "http://localhost:11434"
+    timeout: 300
 
 routes:
-  - pattern: "claude-*"
+  - pattern: "claude-3*"
     provider: anthropic
     priority: 100
   
-  - pattern: "gpt-*"
+  - pattern: "gpt-4*"
     provider: openai
     priority: 90
   
@@ -130,461 +142,143 @@ routes:
 defaultProvider: openai
 ```
 
-### Server Options
+### Pattern Syntax
 
-```yaml
-server:
-  port: 3000              # Port to listen on
-  host: "0.0.0.0"         # Host to bind (0.0.0.0 = all interfaces)
-  timeout: 120            # Request timeout in seconds
-  cors:
-    origin: "*"           # CORS origin (* or specific domain)
-    credentials: false    # Allow credentials
-```
+- `*` - Matches any sequence of characters
+- `?` - Matches any single character
+- `${1}`, `${2}`, etc. - Capture groups for model mapping
 
-### Logging Options
+### Priority System
 
-```yaml
-logging:
-  dir: "./logs"           # Log directory (omit to disable)
-  level: "info"           # debug, info, warn, error
-  maskKeys: true          # Mask API keys in logs
-```
+Routes are checked in priority order (highest first). First match wins.
 
-### Preload Options
-
-```yaml
-preload:
-  enabled: true           # Warm up models on startup
-  models:                 # List of models to preload
-    - "gpt-4o-mini"
-    - "claude-3-haiku"
-```
-
-### API Schemes
-
-Define which API endpoints to expose:
-
-```yaml
-schemes:
-  - id: anthropic
-    path: "/v1/messages"
-    format: "anthropic"
-  
-  - id: openai
-    path: "/v1/chat/completions"
-    format: "openai"
-```
-
-Supported formats: `openai`, `anthropic`, `openai-compatible`
-
-### Providers
-
-Built-in providers with sensible defaults:
-
-| Provider | Base URL | API Key Env Var |
-|----------|----------|-----------------|
-| `openai` | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
-| `anthropic` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
-| `google` | `https://generativelanguage.googleapis.com/v1beta` | `GOOGLE_API_KEY` |
-| `ollama` | `http://localhost:11434` | - |
-| `lmstudio` | `http://localhost:1234/v1` | - |
-| `llamacpp` | `http://localhost:8080/v1` | - |
-| `vllm` | `http://localhost:8000/v1` | - |
-| `fireworks` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` |
-| `together` | `https://api.together.xyz/v1` | `TOGETHER_API_KEY` |
-| `groq` | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` |
-| `perplexity` | `https://api.perplexity.ai` | `PERPLEXITY_API_KEY` |
-| `anyscale` | `https://api.endpoints.anyscale.com/v1` | `ANYSCALE_API_KEY` |
-| `deepseek` | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
-| `mistral` | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` |
-| `cohere` | `https://api.cohere.ai/v1` | `COHERE_API_KEY` |
-| `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
-
-#### Provider Configuration Options
-
-```yaml
-providers:
-  myprovider:
-    baseUrl: "https://api.example.com/v1"    # Required for custom providers
-    apiKey: "sk-..."                          # Static API key
-    apiKeyEnv: "MY_API_KEY"                   # Environment variable name
-    authHeader: "Authorization"               # Header name for auth
-    authPrefix: "Bearer "                     # Prefix for auth header
-    headers:                                  # Additional headers
-      X-Custom-Header: "value"
-    timeout: 120                              # Timeout in seconds
-    supportsStreaming: true                   # Whether streaming is supported
-```
-
-### Routes
-
-Routes define how model names are mapped to providers. Patterns support wildcards:
-
-- `*` - matches any sequence of characters
-- `?` - matches any single character
-
-```yaml
-routes:
-  - pattern: "claude-3-opus*"      # Matches claude-3-opus-20240229, etc.
-    provider: anthropic
-    priority: 100                   # Higher = checked first
-  
-  - pattern: "gpt-4*"              # Matches gpt-4, gpt-4-turbo, etc.
-    provider: openai
-    priority: 90
-  
-  - pattern: "local/*"             # Matches local/anything
-    provider: ollama
-    model: "${1}"                   # Use capture group (anything after local/)
-    priority: 80
-```
-
-### YAML Anchors and Aliases
-
-Use YAML anchors (`&`) and aliases (`*`) to avoid repetition:
-
-```yaml
-providers:
-  # Define base settings
-  openai: &openai-defaults
-    baseUrl: "https://api.openai.com/v1"
-    apiKeyEnv: "OPENAI_API_KEY"
-    timeout: 180
-  
-  # Inherit and override
-  openai-azure:
-    <<: *openai-defaults
-    baseUrl: "https://myaccount.openai.azure.com/openai/deployments"
-    apiKeyEnv: "AZURE_OPENAI_KEY"
-  
-  # Another override
-  openai-backup:
-    <<: *openai-defaults
-    apiKeyEnv: "OPENAI_BACKUP_KEY"
-```
+- `100+` - Exact matches, critical routes
+- `70-99` - High priority (e.g., GPT-4, Claude)
+- `50-69` - Medium priority
+- `30-49` - Low priority
+- `0-29` - Fallback routes
 
 ## Usage
 
-### Anthropic API Format
-
-```bash
-curl http://localhost:3000/v1/messages \
-  -H "x-api-key: $ANTHROPIC_API_KEY" \
-  -H "content-type: application/json" \
-  -d '{
-    "model": "claude-3-sonnet-20240229",
-    "max_tokens": 1024,
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'
-```
-
-### OpenAI API Format
+### Using OpenAI API Format
 
 ```bash
 curl http://localhost:3000/v1/chat/completions \
-  -H "authorization: Bearer $OPENAI_API_KEY" \
-  -H "content-type: application/json" \
+  -H "Authorization: Bearer your-key" \
+  -H "Content-Type: application/json" \
   -d '{
     "model": "gpt-4o",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
 
-### Local Models (Ollama)
+### Using Anthropic API Format
 
 ```bash
-# If you have a route like: pattern: "llama*", provider: ollama
+curl http://localhost:3000/v1/messages \
+  -H "x-api-key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-3-opus-20240229",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+### Local Models via Ollama
+
+```bash
 curl http://localhost:3000/v1/chat/completions \
-  -H "authorization: Bearer dummy" \
+  -H "Authorization: Bearer dummy" \
   -d '{
     "model": "llama2:13b",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
 
-### With Provider Prefix
+## GUI Features
 
-```yaml
-# Config
-routes:
-  - pattern: "groq/*"
-    provider: groq
-    model: "${1}"
-```
+### Dashboard
+- Real-time request statistics
+- Unrouted requests list with one-click route creation
+- Provider status and routing overview
 
-```bash
-curl http://localhost:3000/v1/chat/completions \
-  -H "authorization: Bearer $GROQ_API_KEY" \
-  -d '{
-    "model": "groq/llama-3.1-70b-versatile",
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'
-```
+### Providers
+- Visual configuration of all providers
+- API key management (direct or environment variables)
+- Custom provider support
 
-## CLI Options
+### Routes
+- Interactive route editor with priority management
+- Pattern tester for validating wildcards
+- Quick-add from unrouted requests
 
-```bash
-bun run index.ts [options]
+### Configuration
+- Raw YAML editor with syntax validation
+- Download/upload configuration
+- Automatic backup on every change
 
-Options:
-  --config <path>        Path to YAML config file (default: config.yaml)
-  --port <number>        Override port from config
-  --log-dir <path>       Override log directory from config
-  --timeout <seconds>    Override timeout from config
-  --help                 Show help message
+### Backups
+- Automatic backup creation
+- One-click restore
+- Backup history management
 
-Examples:
-  bun run index.ts
-  bun run index.ts --config ./production.yaml
-  bun run index.ts --port 8080 --log-dir ./logs
-```
+### Logs
+- Request/response logging
+- Error tracking
+- Detailed request inspection
 
 ## Environment Variables
 
-The router reads API keys from environment variables based on provider configuration:
+All built-in providers support environment variables for API keys:
+
+- `OPENAI_API_KEY` - OpenAI
+- `ANTHROPIC_API_KEY` - Anthropic
+- `GOOGLE_API_KEY` - Google Gemini
+- `GROQ_API_KEY` - Groq
+- `TOGETHER_API_KEY` - Together AI
+- `FIREWORKS_API_KEY` - Fireworks AI
+- `DEEPSEEK_API_KEY` - DeepSeek
+- `MISTRAL_API_KEY` - Mistral AI
+- `COHERE_API_KEY` - Cohere
+- `OPENROUTER_API_KEY` - OpenRouter
+- `PERPLEXITY_API_KEY` - Perplexity
+- `ANYSCALE_API_KEY` - Anyscale
+
+## Management API
+
+The server exposes a management API at `/api/admin/`:
+
+- `GET /api/admin/status` - System status
+- `GET /api/admin/providers` - List providers
+- `PUT /api/admin/providers` - Update providers
+- `GET /api/admin/routes` - List routes
+- `PUT /api/admin/routes` - Update routes
+- `GET /api/admin/unrouted` - Get unrouted requests
+- `GET /api/admin/backups` - List backups
+- `POST /api/admin/backups` - Create backup
+- `POST /api/admin/backups/:filename` - Restore backup
+
+## Development
+
+### API Server
 
 ```bash
-# Required for cloud providers
-export OPENAI_API_KEY="sk-..."
-export ANTHROPIC_API_KEY="sk-ant-..."
-export GROQ_API_KEY="gsk_..."
-
-# Run the server
-bun run index.ts
+bun run dev
 ```
 
-Or use a `.env` file (loaded automatically by Bun):
+### GUI
 
 ```bash
-# .env
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
+cd gui
+bun run dev
 ```
 
-## Advanced Examples
-
-### Example 1: Smart Routing by Model Type
-
-```yaml
-routes:
-  # Coding models → Anthropic (Claude is great at coding)
-  - pattern: "*code*"
-    provider: anthropic
-    priority: 100
-  
-  # Fast/cheap models → Groq
-  - pattern: "*fast*"
-    provider: groq
-    priority: 90
-  
-  # Everything else → OpenAI
-  - pattern: "*"
-    provider: openai
-    priority: 10
-```
-
-### Example 2: Multi-Region Fallback
-
-```yaml
-providers:
-  openai-us: &openai
-    baseUrl: "https://api.openai.com/v1"
-    apiKeyEnv: "OPENAI_API_KEY"
-  
-  openai-eu:
-    <<: *openai
-    baseUrl: "https://api.openai.com/v1"  # Same but different routing logic
-
-routes:
-  - pattern: "gpt-4*"
-    provider: openai-us
-    priority: 100
-```
-
-### Example 3: Cost-Optimized Routing
-
-```yaml
-routes:
-  # Small/fast tasks → Groq (cheap & fast)
-  - pattern: "*haiku*"
-    provider: groq
-    model: "llama-3.1-8b-instant"
-    priority: 100
-  
-  # Medium tasks → Together AI
-  - pattern: "*sonnet*"
-    provider: together
-    model: "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
-    priority: 100
-  
-  # Complex tasks → Anthropic
-  - pattern: "*opus*"
-    provider: anthropic
-    priority: 100
-```
-
-### Example 4: Development vs Production
-
-```yaml
-providers:
-  # Local development
-  local-dev:
-    baseUrl: "http://localhost:11434"
-  
-  # Production
-  openai-prod:
-    apiKeyEnv: "OPENAI_API_KEY"
-
-routes:
-  - pattern: "dev/*"
-    provider: local-dev
-    model: "${1}"
-    priority: 100
-  
-  - pattern: "prod/*"
-    provider: openai-prod
-    model: "${1}"
-    priority: 100
-```
-
-Usage:
-```bash
-# Development
-curl ... -d '{"model": "dev/llama2"}'
-
-# Production
-curl ... -d '{"model": "prod/gpt-4o"}'
-```
-
-## Health Check
+### Build GUI for Production
 
 ```bash
-curl http://localhost:3000/health
-```
-
-Response:
-```json
-{
-  "status": "ok",
-  "requestId": "...",
-  "version": "2.0.0",
-  "schemes": ["anthropic", "openai"],
-  "providers": ["openai", "anthropic", "ollama", "groq", ...]
-}
-```
-
-## Logging
-
-When logging is enabled, each request is saved as a JSON file:
-
-```
-logs/
-  000001_anthropic_claude-3-opus_abc123.json
-  000002_openai_gpt-4o_def456.json
-  000003_ollama_llama2_ghi789.json
-```
-
-Each log contains:
-- Request and response headers (with masked API keys)
-- Request body
-- Transformed body (if applicable)
-- Response body or error
-- Duration
-
-## Architecture
-
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Client        │────▶│  Universal       │────▶│  OpenAI API     │
-│                 │     │  Model Router    │     │                 │
-│  Anthropic SDK  │────▶│                  │────▶│  Anthropic API  │
-│                 │     │  - Route matching│     │                 │
-│  OpenAI SDK     │────▶│  - Transform     │────▶│  Groq API       │
-│                 │     │  - Auth handling │     │                 │
-│  curl/HTTP      │────▶│  - Logging       │────▶│  Ollama         │
-│                 │     │                  │     │  (local)        │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
-                               │
-                               ▼
-                        ┌──────────────┐
-                        │  Config YAML │
-                        │  (routes)    │
-                        └──────────────┘
-```
-
-## Adding New Providers
-
-To add a new provider, simply add it to the `providers` section:
-
-```yaml
-providers:
-  my-provider:
-    baseUrl: "https://api.myprovider.com/v1"
-    apiKeyEnv: "MY_PROVIDER_KEY"
-    authHeader: "Authorization"
-    authPrefix: "Bearer "
-    headers:
-      X-Custom-Header: "value"
-```
-
-Then create a route:
-
-```yaml
-routes:
-  - pattern: "myprovider/*"
-    provider: my-provider
-    model: "${1}"
-```
-
-## Troubleshooting
-
-### Connection refused to local provider
-
-Ensure your local LLM server is running:
-
-```bash
-# Ollama
-ollama serve
-
-# LM Studio
-# Start LM Studio and enable the local server
-
-# llama.cpp
-./server -m model.gguf
-```
-
-### API key not found
-
-Set the environment variable or configure in YAML:
-
-```yaml
-providers:
-  openai:
-    apiKey: "sk-..."           # Option 1: Direct in config
-    # apiKeyEnv: "MY_KEY"      # Option 2: Custom env var name
-```
-
-### Request timeouts
-
-Increase timeout for slow providers:
-
-```yaml
-providers:
-  ollama:
-    baseUrl: "http://localhost:11434"
-    timeout: 600  # 10 minutes for large local models
-```
-
-### Pattern not matching
-
-Routes are checked by priority (higher first), then order. Ensure your pattern is correct:
-
-```yaml
-routes:
-  - pattern: "claude-*"     # Correct: matches claude-3-opus
-  - pattern: "claude*"      # Also correct: matches anything starting with claude
-  - pattern: "claude-3*"    # More specific: only matches claude-3 series
+cd gui
+bun run build
 ```
 
 ## License

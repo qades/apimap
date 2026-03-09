@@ -1,34 +1,41 @@
-# dependencies (bun install)
-node_modules
+# Dependencies
+node_modules/
+gui/node_modules/
 
-# output
-out
-dist
-*.tgz
+# Logs
+logs/
+*.log
 
-# code coverage
-coverage
-*.lcov
+# Config files (machine-specific, keep folder via .gitkeep)
+config/*.yaml
+config/backups/
 
-# logs
-logs
-_.log
-report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+# Logs
+log
 
-# dotenv environment variable files
+# Build outputs
+dist/
+build/
+gui/build/
+.svelte-kit/
+
+# Environment
 .env
-.env.development.local
-.env.test.local
-.env.production.local
 .env.local
 
-# caches
-.eslintcache
-.cache
-*.tsbuildinfo
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# IntelliJ based IDEs
-.idea
-
-# Finder (MacOS) folder config
+# OS
 .DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+
+# Temporary files
+*.tmp
+*.temp

@@ -46,24 +46,29 @@ preload:
 # ═══════════════════════════════════════════════════════════════════════════════
 # API Schemes
 # ═══════════════════════════════════════════════════════════════════════════════
-# Define which API endpoints to expose. The router can listen on multiple
-# API formats simultaneously and route them all appropriately.
+# Define which API endpoints to expose. Each scheme has an ID and references
+# a transformer format. The actual endpoint URIs are internal to providers.
+#
+# Available formats:
+#   - openai-chat: OpenAI Chat Completions API
+#   - openai-completions: OpenAI Legacy Completions API
+#   - openai-responses: OpenAI Responses API
+#   - anthropic-messages: Anthropic Messages API
+#   - ollama-chat: Ollama Chat API
+#   - ollama-generate: Ollama Generate API
 
 schemes:
   # Anthropic Messages API format
   - id: anthropic
-    path: "/v1/messages"
-    format: "anthropic"
+    format: "anthropic-messages"
   
   # OpenAI Chat Completions API format
   - id: openai
-    path: "/v1/chat/completions"
-    format: "openai"
+    format: "openai-chat"
   
-  # You can add more schemes for different paths if needed
-  # - id: openai_legacy
-  #   path: "/v1/completions"
-  #   format: "openai"
+  # You can add more schemes with different formats
+  # - id: openai-responses
+  #   format: "openai-responses"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Provider Configurations
