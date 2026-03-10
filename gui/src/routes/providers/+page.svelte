@@ -23,6 +23,10 @@
   let hasChanges = $state(false);
   let saveError: string | null = $state(null);
   let saveSuccess = $state(false);
+  
+  // Global settings
+  let globalTimeout = $state(120);
+  let showTimeoutOverrides = $state<Record<string, boolean>>({});
 
   // Auth preset options
   const authPresets = [
@@ -41,12 +45,19 @@
   async function loadProviders() {
     isLoadingProviders.set(true);
     try {
-      const data = await providersApi.getAll();
+      const [data, configData] = await Promise.all([
+        providersApi.getAll(),
+        fetch('/api/admin/config').then(r => r.json())
+      ]);
       builtinProviders.set(data.builtin);
       providers.set(data.registered);
       
+      // Load global timeout from config
+      globalTimeout = configData.server?.timeout || 120;
+      
       // Initialize editing state
       editingProviders = {};
+      showTimeoutOverrides = {};
       for (const provider of data.registered) {
         editingProviders[provider.id] = {
           baseUrl: provider.defaultBaseUrl,
@@ -54,7 +65,11 @@
           authHeader: provider.authHeader,
           authPrefix: provider.authPrefix,
           supportsStreaming: provider.supportsStreaming,
+          // timeout is loaded from config if set
+          timeout: configData.providers?.[provider.id]?.timeout,
         };
+        // Show timeout field if provider has custom timeout
+        showTimeoutOverrides[provider.id] = !!configData.providers?.[provider.id]?.timeout;
       }
     } catch (err) {
       console.error('Failed to load providers:', err);
@@ -90,7 +105,23 @@
   async function saveProviders() {
     saveError = null;
     try {
+      // Save providers
       await providersApi.update(editingProviders);
+      
+      // Save global timeout
+      const currentConfig = await fetch('/api/admin/config').then(r => r.json());
+      await fetch('/api/admin/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...currentConfig,
+          server: {
+            ...currentConfig.server,
+            timeout: globalTimeout,
+          },
+        }),
+      });
+      
       hasChanges = false;
       saveSuccess = true;
       setTimeout(() => saveSuccess = false, 3000);
@@ -177,6 +208,34 @@
   {#if $isLoadingProviders}
     <div class="text-center py-12 text-gray-500">Loading providers...</div>
   {:else}
+    <!-- Global Settings -->
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+        <h2 class="text-lg font-semibold text-gray-900">Global Settings</h2>
+      </div>
+      <div class="p-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label for="global-timeout" class="block text-sm font-medium text-gray-700 mb-1">
+              Default Timeout (seconds)
+            </label>
+            <input
+              id="global-timeout"
+              type="number"
+              min="1"
+              max="600"
+              bind:value={globalTimeout}
+              oninput={() => hasChanges = true}
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+            />
+            <p class="text-xs text-gray-500 mt-1">
+              Default request timeout for all providers. Can be overridden per provider.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Provider Categories -->
     {#each categories as category}
       {@const categoryProviders = getCategoryProviders(category.id)}
@@ -305,6 +364,39 @@
                       Prefix: <code>"{editing.authPrefix || provider.authPrefix}"</code>
                     </p>
                   </div>
+
+                  <!-- Timeout Override -->
+                  <div>
+                    <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-1">
+                      <input
+                        type="checkbox"
+                        checked={showTimeoutOverrides[provider.id]}
+                        onchange={(e) => {
+                          showTimeoutOverrides[provider.id] = e.currentTarget.checked;
+                          if (!e.currentTarget.checked) {
+                            // Clear timeout when unchecked
+                            updateProvider(provider.id, { timeout: undefined });
+                          }
+                          hasChanges = true;
+                        }}
+                        class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                      Custom Timeout
+                    </label>
+                    {#if showTimeoutOverrides[provider.id]}
+                      <input
+                        type="number"
+                        min="1"
+                        max="600"
+                        value={editing.timeout || globalTimeout}
+                        oninput={(e) => updateProvider(provider.id, { timeout: parseInt(e.currentTarget.value) })}
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                      />
+                      <p class="text-xs text-gray-500 mt-1">
+                        Override global timeout (default: {globalTimeout}s)
+                      </p>
+                    {/if}
+                  </div>
                 </div>
 
                 <!-- Streaming Support -->
@@ -430,6 +522,38 @@
                     Header: <code>{customConfig.authHeader || 'Authorization'}</code>, 
                     Prefix: <code>"{customConfig.authPrefix || 'Bearer '}"</code>
                   </p>
+                </div>
+
+                <!-- Timeout Override for Custom -->
+                <div>
+                  <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-1">
+                    <input
+                      type="checkbox"
+                      checked={showTimeoutOverrides[id]}
+                      onchange={(e) => {
+                        showTimeoutOverrides[id] = e.currentTarget.checked;
+                        if (!e.currentTarget.checked) {
+                          updateProvider(id, { timeout: undefined });
+                        }
+                        hasChanges = true;
+                      }}
+                      class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    Custom Timeout
+                  </label>
+                  {#if showTimeoutOverrides[id]}
+                    <input
+                      type="number"
+                      min="1"
+                      max="600"
+                      value={customConfig.timeout || globalTimeout}
+                      oninput={(e) => updateProvider(id, { timeout: parseInt(e.currentTarget.value) })}
+                      class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    />
+                    <p class="text-xs text-gray-500 mt-1">
+                      Override global timeout (default: {globalTimeout}s)
+                    </p>
+                  {/if}
                 </div>
               </div>
 

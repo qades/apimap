@@ -260,7 +260,7 @@ let unrouted = $state<UnroutedRequest[]>([]);
 | `/health` | GET | Health check |
 | `/v1/chat/completions` | POST | OpenAI format |
 | `/v1/messages` | POST | Anthropic format |
-| `/v1/models` | GET | List available models |
+| `/v1/models` | GET | List available models (OpenAI or Anthropic format, auto-detected)
 
 ### Management (for GUI)
 

@@ -196,6 +196,23 @@ curl http://localhost:3000/v1/chat/completions \
   }'
 ```
 
+### Listing Available Models
+
+The server provides a models endpoint that works like OpenAI's and Anthropic's native endpoints:
+
+```bash
+# OpenAI format (default)
+curl http://localhost:3000/v1/models \
+  -H "Authorization: Bearer your-key"
+
+# Anthropic format (auto-detected by headers)
+curl http://localhost:3000/v1/models \
+  -H "x-api-key: your-key" \
+  -H "anthropic-version: 2023-06-01"
+```
+
+The endpoint aggregates models from all configured providers and route patterns.
+
 ## GUI Features
 
 ### Dashboard

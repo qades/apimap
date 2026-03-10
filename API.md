@@ -157,9 +157,9 @@ Standard Anthropic Messages API endpoint.
 GET /v1/models
 ```
 
-Returns available models based on configured routes.
+Returns available models from all configured providers and routes. The server fetches models from upstream providers (OpenAI, Anthropic, Ollama, etc.) and merges them with configured route patterns.
 
-**Response:**
+**OpenAI-Compatible Format** (default):
 ```json
 {
   "object": "list",
@@ -171,7 +171,7 @@ Returns available models based on configured routes.
       "owned_by": "openai"
     },
     {
-      "id": "claude-3-opus",
+      "id": "claude-3-opus-20240229",
       "object": "model",
       "created": 1700000000,
       "owned_by": "anthropic"
@@ -179,6 +179,38 @@ Returns available models based on configured routes.
   ]
 }
 ```
+
+**Anthropic-Compatible Format** (when using `anthropic-version` or `x-api-key` header):
+```json
+{
+  "data": [
+    {
+      "type": "model",
+      "id": "claude-3-opus-20240229",
+      "display_name": "Claude 3 Opus",
+      "created_at": "2024-01-01T00:00:00Z"
+    },
+    {
+      "type": "model",
+      "id": "gpt-4o",
+      "display_name": "gpt-4o",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  ],
+  "has_more": false,
+  "first_id": "claude-3-opus-20240229",
+  "last_id": "gpt-4o"
+}
+```
+
+**Headers:**
+- `Authorization: Bearer <token>` - Standard OpenAI auth
+- `x-api-key: <token>` - Anthropic-style auth (switches response format)
+- `anthropic-version: 2023-06-01` - Required for Anthropic format
+
+The endpoint automatically detects the expected format based on request headers:
+- If `anthropic-version` or `x-api-key` header is present, returns Anthropic format
+- Otherwise, returns OpenAI format
 
 ---
 

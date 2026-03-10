@@ -1268,6 +1268,264 @@ async function handleGetModels(url: URL, headers: Record<string, string>): Promi
   });
 }
 
+// OpenAI-compatible /v1/models endpoint
+async function handleGetModelsOpenAI(corsHeaders: Record<string, string>): Promise<Response> {
+  const models: Array<{
+    id: string;
+    object: string;
+    created: number;
+    owned_by: string;
+  }> = [];
+  const seen = new Set<string>();
+  const now = Math.floor(Date.now() / 1000);
+  
+  const routes = state.router.getRoutes();
+  const config = state.config.getConfig();
+  
+  // First, try to fetch models from all configured providers
+  for (const [providerId, providerConfig] of Object.entries(config.providers)) {
+    try {
+      const provider = providerRegistry.get(providerId);
+      if (!provider) continue;
+      
+      const modelsUrl = provider.getModelsUrl();
+      if (!modelsUrl) continue;
+      
+      const headers = provider.getHeaders();
+      
+      const response = await fetch(modelsUrl, {
+        method: 'GET',
+        headers,
+      });
+      
+      if (response.ok) {
+        const data = await response.json() as { 
+          data?: Array<{ id: string; created?: number; owned_by?: string }>;
+          models?: Array<{ id?: string; name?: string; model?: string; created?: number; owned_by?: string }>;
+        };
+        
+        // Handle OpenAI-style response format (data array)
+        if (data.data && Array.isArray(data.data)) {
+          for (const model of data.data) {
+            if (model.id && !seen.has(model.id)) {
+              seen.add(model.id);
+              models.push({
+                id: model.id,
+                object: "model",
+                created: model.created || now,
+                owned_by: model.owned_by || providerId,
+              });
+            }
+          }
+        }
+        // Handle Ollama-style response format (models array with 'name' field)
+        else if (data.models && Array.isArray(data.models)) {
+          for (const model of data.models) {
+            const modelId = model.id || model.name || model.model || '';
+            if (modelId && !seen.has(modelId)) {
+              seen.add(modelId);
+              models.push({
+                id: modelId,
+                object: "model",
+                created: model.created || now,
+                owned_by: model.owned_by || providerId,
+              });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      // Provider doesn't support /models endpoint or is unreachable - that's ok
+      console.log(`[models] Could not fetch from ${providerId}: ${error}`);
+    }
+  }
+  
+  // Add models from route patterns (as fallbacks or additional patterns)
+  for (const route of routes) {
+    // For wildcard patterns, use the base pattern as a representative model
+    if (route.pattern.includes('*')) {
+      const basePattern = route.pattern.replace(/\*/g, '');
+      if (basePattern && !seen.has(route.pattern)) {
+        seen.add(route.pattern);
+        models.push({
+          id: route.pattern,
+          object: "model",
+          created: now,
+          owned_by: route.provider,
+        });
+      }
+    } else if (!seen.has(route.pattern)) {
+      // Exact patterns become models directly
+      seen.add(route.pattern);
+      models.push({
+        id: route.pattern,
+        object: "model",
+        created: now,
+        owned_by: route.provider,
+      });
+    }
+  }
+  
+  return new Response(JSON.stringify({ 
+    object: "list",
+    data: models 
+  }), {
+    headers: { "Content-Type": "application/json", ...corsHeaders }
+  });
+}
+
+// Anthropic-compatible /v1/models endpoint
+async function handleGetModelsAnthropic(corsHeaders: Record<string, string>): Promise<Response> {
+  const models: Array<{
+    type: string;
+    id: string;
+    display_name: string;
+    created_at: string;
+  }> = [];
+  const seen = new Set<string>();
+  
+  const routes = state.router.getRoutes();
+  const config = state.config.getConfig();
+  const now = new Date().toISOString();
+  
+  // Try to fetch models from Anthropic provider if configured
+  const anthropicProvider = providerRegistry.get('anthropic');
+  if (anthropicProvider) {
+    try {
+      const modelsUrl = anthropicProvider.getModelsUrl();
+      if (modelsUrl) {
+        const headers = anthropicProvider.getHeaders();
+        
+        const response = await fetch(modelsUrl, {
+          method: 'GET',
+          headers,
+        });
+        
+        if (response.ok) {
+          const data = await response.json() as {
+            data?: Array<{ 
+              type?: string;
+              id: string; 
+              display_name?: string;
+              created_at?: string;
+            }>;
+          };
+          
+          // Handle Anthropic response format
+          if (data.data && Array.isArray(data.data)) {
+            for (const model of data.data) {
+              if (model.id && !seen.has(model.id)) {
+                seen.add(model.id);
+                models.push({
+                  type: model.type || "model",
+                  id: model.id,
+                  display_name: model.display_name || model.id,
+                  created_at: model.created_at || now,
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.log(`[models] Could not fetch from anthropic: ${error}`);
+    }
+  }
+  
+  // Also fetch from other providers and map to Anthropic format
+  for (const [providerId, providerConfig] of Object.entries(config.providers)) {
+    if (providerId === 'anthropic') continue; // Already handled above
+    
+    try {
+      const provider = providerRegistry.get(providerId);
+      if (!provider) continue;
+      
+      const modelsUrl = provider.getModelsUrl();
+      if (!modelsUrl) continue;
+      
+      const headers = provider.getHeaders();
+      
+      const response = await fetch(modelsUrl, {
+        method: 'GET',
+        headers,
+      });
+      
+      if (response.ok) {
+        const data = await response.json() as { 
+          data?: Array<{ id: string; created?: number }>;
+          models?: Array<{ id?: string; name?: string; model?: string }>;
+        };
+        
+        // Handle OpenAI-style response format
+        if (data.data && Array.isArray(data.data)) {
+          for (const model of data.data) {
+            if (model.id && !seen.has(model.id)) {
+              seen.add(model.id);
+              const createdDate = model.created ? new Date(model.created * 1000).toISOString() : now;
+              models.push({
+                type: "model",
+                id: model.id,
+                display_name: model.id,
+                created_at: createdDate,
+              });
+            }
+          }
+        }
+        // Handle Ollama-style response format
+        else if (data.models && Array.isArray(data.models)) {
+          for (const model of data.models) {
+            const modelId = model.id || model.name || model.model || '';
+            if (modelId && !seen.has(modelId)) {
+              seen.add(modelId);
+              models.push({
+                type: "model",
+                id: modelId,
+                display_name: modelId,
+                created_at: now,
+              });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.log(`[models] Could not fetch from ${providerId}: ${error}`);
+    }
+  }
+  
+  // Add models from route patterns as fallbacks
+  for (const route of routes) {
+    let modelId: string;
+    
+    if (route.pattern.includes('*')) {
+      const basePattern = route.pattern.replace(/\*/g, '');
+      if (!basePattern || seen.has(route.pattern)) continue;
+      modelId = route.pattern;
+      seen.add(route.pattern);
+    } else if (!seen.has(route.pattern)) {
+      modelId = route.pattern;
+      seen.add(route.pattern);
+    } else {
+      continue;
+    }
+    
+    models.push({
+      type: "model",
+      id: modelId,
+      display_name: modelId,
+      created_at: now,
+    });
+  }
+  
+  return new Response(JSON.stringify({
+    data: models,
+    has_more: false,
+    first_id: models.length > 0 ? models[0].id : null,
+    last_id: models.length > 0 ? models[models.length - 1].id : null,
+  }), {
+    headers: { "Content-Type": "application/json", ...corsHeaders }
+  });
+}
+
 // ============================================================================
 // Main Server
 // ============================================================================
@@ -1495,6 +1753,15 @@ ${boxBottom()}
       // Management API
       if (url.pathname.startsWith("/api/admin/")) {
         return handleManagementAPI(req, url);
+      }
+
+      // OpenAI-compatible /v1/models endpoint
+      if (url.pathname === "/v1/models" && req.method === "GET") {
+        // Check if it's an Anthropic request based on headers
+        if (req.headers.get("anthropic-version") || req.headers.get("x-api-key")) {
+          return handleGetModelsAnthropic(corsHeaders);
+        }
+        return handleGetModelsOpenAI(corsHeaders);
       }
 
       // Handle API requests
