@@ -10,7 +10,8 @@
     Activity,
     Menu,
     X,
-    Beaker
+    Beaker,
+    Activity as MonitorIcon
   } from '@lucide/svelte';
   import { page } from '$app/stores';
 
@@ -25,6 +26,7 @@
   const navItems = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/test', label: 'Test Models', icon: Beaker },
+    { path: '/monitor', label: 'Parallel Monitor', icon: MonitorIcon },
     { path: '/providers', label: 'Providers', icon: Server },
     { path: '/routes', label: 'Routes', icon: Route },
     { path: '/config', label: 'Configuration', icon: Settings },

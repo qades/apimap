@@ -10,11 +10,13 @@
     CheckCircle,
     Search,
     Star,
-    X
+    X,
+    Loader2,
+    ChevronDown
   } from '@lucide/svelte';
   import { routes, providers, isLoadingRoutes, unroutedRequests } from '$lib/stores';
-  import { routesApi, providersApi } from '$lib/utils/api';
-  import type { RouteConfig } from '$lib/utils/api';
+  import { routesApi, providersApi, modelsApi } from '$lib/utils/api';
+  import type { RouteConfig, ModelInfo } from '$lib/utils/api';
 
   let editingRoutes: RouteConfig[] = $state([]);
   let hasChanges = $state(false);
@@ -24,6 +26,13 @@
   let showAddModal = $state(false);
   let testPattern = $state('');
   let testResults: Array<{ model: string; matched: boolean; captures: string[] }> = $state([]);
+  
+  // Model fetching state
+  let availableModels = $state<ModelInfo[]>([]);
+  let loadingModels = $state(false);
+  let modelSearchQuery = $state('');
+  let showModelDropdown = $state(false);
+  let selectedProviderModels = $state<ModelInfo[]>([]);
 
   // Get model from URL query params (when coming from unrouted requests)
   $effect(() => {
@@ -67,6 +76,39 @@
     saveSuccess = false;
   }
 
+  async function fetchModelsForProvider(providerId: string) {
+    if (!providerId) {
+      selectedProviderModels = [];
+      return;
+    }
+    
+    loadingModels = true;
+    try {
+      const allModels = await modelsApi.getAll();
+      selectedProviderModels = allModels.models.filter(m => m.provider === providerId);
+    } catch (err) {
+      console.error('Failed to fetch models:', err);
+      selectedProviderModels = [];
+    } finally {
+      loadingModels = false;
+    }
+  }
+  
+  function onProviderChange(event: Event) {
+    const select = event.target as HTMLSelectElement;
+    const providerId = select.value;
+    newRoute.provider = providerId;
+    newRoute.model = ''; // Reset model when provider changes
+    fetchModelsForProvider(providerId);
+  }
+  
+  function selectModel(modelId: string) {
+    // For model mapping, we suggest ${1} to capture from pattern
+    newRoute.model = modelId.includes('/') ? '${1}' : modelId;
+    showModelDropdown = false;
+    modelSearchQuery = '';
+  }
+  
   function addRoute() {
     if (!newRoute.pattern || !newRoute.provider) return;
     
@@ -85,6 +127,8 @@
     saveSuccess = false;
     showAddModal = false;
     newRoute = {};
+    selectedProviderModels = [];
+    modelSearchQuery = '';
   }
 
   async function saveRoutes() {
@@ -473,7 +517,8 @@
           </label>
           <select
             id="route-provider"
-            bind:value={newRoute.provider}
+            value={newRoute.provider}
+            onchange={onProviderChange}
             class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="">Select provider...</option>
@@ -483,19 +528,94 @@
           </select>
         </div>
 
-        <div>
-          <label for="route-model" class="block text-sm font-medium text-gray-700 mb-1">
-            Model Mapping (optional)
-          </label>
-          <input
-            id="route-model"
-            type="text"
-            bind:value={newRoute.model}
-            placeholder="Same as input (auto)"
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
-          />
-          <p class="text-xs text-gray-500 mt-1">Use ${'{'}1{'}'}, ${'{'}2{'}'}, etc. to insert captured wildcards</p>
-        </div>
+        {#if newRoute.provider}
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              Model Mapping (optional)
+            </label>
+            
+            <!-- Model Selection Dropdown -->
+            <div class="relative">
+              <button
+                type="button"
+                onclick={() => showModelDropdown = !showModelDropdown}
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-left flex items-center justify-between"
+                class:bg-gray-50={loadingModels}
+              >
+                <span class={newRoute.model ? 'font-mono text-gray-900' : 'text-gray-500'}>
+                  {newRoute.model || 'Select a model or type custom...'}
+                </span>
+                {#if loadingModels}
+                  <Loader2 size={16} class="animate-spin text-gray-400" />
+                {:else}
+                  <ChevronDown size={16} class="text-gray-400" />
+                {/if}
+              </button>
+              
+              {#if showModelDropdown}
+                <div class="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-64 overflow-auto">
+                  <!-- Search input -->
+                  <div class="p-2 border-b border-gray-200 sticky top-0 bg-white">
+                    <input
+                      type="text"
+                      bind:value={modelSearchQuery}
+                      placeholder="Search models..."
+                      class="w-full px-3 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  
+                  <!-- Model list -->
+                  <div class="py-1">
+                    <button
+                      type="button"
+                      onclick={() => { newRoute.model = ''; showModelDropdown = false; }}
+                      class="w-full px-3 py-2 text-left text-sm hover:bg-gray-100 text-gray-600"
+                    >
+                      Auto (same as input pattern)
+                    </button>
+                    
+                    {#if selectedProviderModels.length > 0}
+                      <div class="px-3 py-1 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Available Models ({selectedProviderModels.length})
+                      </div>
+                      {#each selectedProviderModels.filter(m => m.id.toLowerCase().includes(modelSearchQuery.toLowerCase())) as model}
+                        <button
+                          type="button"
+                          onclick={() => selectModel(model.id)}
+                          class="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 flex flex-col"
+                        >
+                          <span class="font-mono text-gray-900">{model.id}</span>
+                          {#if model.description}
+                            <span class="text-xs text-gray-500 truncate">{model.description}</span>
+                          {/if}
+                        </button>
+                      {/each}
+                    {:else}
+                      <div class="px-3 py-2 text-sm text-gray-500">
+                        No models found from provider. Type custom mapping below.
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+              {/if}
+            </div>
+            
+            <!-- Custom Model Input -->
+            <div class="mt-2">
+              <input
+                id="route-model"
+                type="text"
+                bind:value={newRoute.model}
+                placeholder="e.g., gpt-4o or ${1} for wildcard capture"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+              />
+            </div>
+            <p class="text-xs text-gray-500 mt-1">
+              Use <code class="bg-gray-100 px-1 rounded">${'{'}1{'}'}</code>, 
+              <code class="bg-gray-100 px-1 rounded">${'{'}2{'}'}</code>, etc. to insert captured wildcards from pattern
+            </p>
+          </div>
+        {/if}
 
         <div>
           <label for="route-priority" class="block text-sm font-medium text-gray-700 mb-1">
@@ -516,7 +636,7 @@
       <div class="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
         <button
           type="button"
-          onclick={() => showAddModal = false}
+          onclick={() => { showAddModal = false; selectedProviderModels = []; modelSearchQuery = ''; showModelDropdown = false; }}
           class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg font-medium"
         >
           Cancel

@@ -215,9 +215,48 @@ export const logsApi = {
     fetchApi<{ logs: LogEntry[] }>(`/logs?limit=${limit}`),
 };
 
-// Model Testing API
+// Models API
+export interface ModelInfo {
+  id: string;
+  name: string;
+  source: 'route' | 'provider';
+  provider?: string;
+  description?: string;
+}
+
+export const modelsApi = {
+  getAll: () => fetchApi<{ models: ModelInfo[] }>('/models'),
+};
+
+// Server Info API
+export interface ServerInfo {
+  apiUrl: string;
+  version: string;
+  uptime: number;
+}
+
+let cachedApiUrl: string | null = null;
+
+export const serverInfoApi = {
+  get: () => fetchApi<ServerInfo>('/server-info'),
+  
+  // Get the API base URL for direct API calls (e.g., /v1/chat/completions)
+  getApiUrl: async (): Promise<string> => {
+    if (cachedApiUrl) return cachedApiUrl;
+    const info = await serverInfoApi.get();
+    cachedApiUrl = info.apiUrl;
+    return cachedApiUrl;
+  },
+  
+  // Clear the cached URL (useful if server config changes)
+  clearCache: () => {
+    cachedApiUrl = null;
+  },
+};
+
+// Model Testing API - calls the API endpoints directly
 export const testModelApi = {
-  test: (params: {
+  test: async (params: {
     model: string;
     message: string;
     systemMessage?: string;
@@ -225,10 +264,29 @@ export const testModelApi = {
     maxTokens?: number;
     stream?: boolean;
     apiFormat?: 'openai' | 'anthropic';
-  }) =>
-    fetch('/api/admin/test-model', {
+  }) => {
+    const apiUrl = await serverInfoApi.getApiUrl();
+    const isAnthropic = params.apiFormat === 'anthropic';
+    const endpoint = isAnthropic ? '/v1/messages' : '/v1/chat/completions';
+    
+    const messages = [];
+    if (params.systemMessage?.trim()) {
+      messages.push({ role: 'system', content: params.systemMessage.trim() });
+    }
+    messages.push({ role: 'user', content: params.message.trim() });
+    
+    const requestBody = {
+      model: params.model.trim(),
+      messages,
+      max_tokens: params.maxTokens ?? 1024,
+      temperature: params.temperature ?? 0.7,
+      stream: params.stream ?? false,
+    };
+    
+    return fetch(`${apiUrl}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    }),
+      body: JSON.stringify(requestBody),
+    });
+  },
 };

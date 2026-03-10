@@ -28,15 +28,14 @@
   let maxTokens = $state(1024);
   let stream = $state(false);
   let apiFormat = $state<'openai' | 'anthropic'>('openai');
-  let endpointPath = $state('/chat/completions');
   let showAdvanced = $state(false);
   
-  // Endpoint options
-  const endpointOptions = [
-    { value: '/chat/completions', label: 'Chat Completions (/chat/completions)', format: 'openai' },
-    { value: '/v1/messages', label: 'Messages (/v1/messages)', format: 'anthropic' },
-    { value: '/completions', label: 'Legacy Completions (/completions)', format: 'openai' },
-  ];
+  // API format determines the endpoint automatically
+  function getEndpointInfo(format: 'openai' | 'anthropic') {
+    return format === 'anthropic' 
+      ? { path: '/v1/messages', name: 'Anthropic Messages API' }
+      : { path: '/v1/chat/completions', name: 'OpenAI Chat Completions API' };
+  }
   
   // Response state
   let loading = $state(false);
@@ -96,6 +95,8 @@
     }
   }
 
+  import { testModelApi } from '$lib/utils/api';
+
   async function sendTest() {
     if (!model.trim() || !message.trim()) return;
     
@@ -103,62 +104,150 @@
     response = null;
     streamingContent = '';
     
+    const startTime = Date.now();
+    
     try {
-      const res = await fetch('/api/admin/test-model', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: model.trim(),
-          message: message.trim(),
-          systemMessage: systemMessage.trim() || undefined,
-          temperature,
-          maxTokens,
-          stream,
-          apiFormat,
-          endpoint: endpointPath,
-        }),
+      const res = await testModelApi.test({
+        model: model.trim(),
+        message: message.trim(),
+        systemMessage: systemMessage.trim(),
+        temperature,
+        maxTokens,
+        stream,
+        apiFormat,
       });
       
-      if (stream && res.ok) {
+      const duration = Date.now() - startTime;
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
+        response = {
+          success: false,
+          error: errorData.error || `HTTP ${res.status}`,
+          details: errorData.message || errorData.details || JSON.stringify(errorData),
+          duration,
+        };
+        loading = false;
+        return;
+      }
+      
+      if (stream) {
         // Handle streaming response
         const reader = res.body?.getReader();
         const decoder = new TextDecoder();
+        let fullContent = '';
+        let finishReason: string | null = null;
+        let usageData = null;
         
         if (reader) {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n');
-            
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6);
-                if (data === '[DONE]') continue;
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              
+              const chunk = decoder.decode(value, { stream: true });
+              const lines = chunk.split('\n');
+              
+              for (const line of lines) {
+                if (!line.trim()) continue;
                 
-                try {
-                  const parsed = JSON.parse(data);
-                  if (parsed.choices?.[0]?.delta?.content) {
-                    streamingContent += parsed.choices[0].delta.content;
+                if (apiFormat === 'anthropic') {
+                  // Anthropic streaming format
+                  if (line.startsWith('event: ')) continue;
+                  if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    try {
+                      const parsed = JSON.parse(data);
+                      
+                      if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+                        fullContent += parsed.delta.text;
+                        streamingContent = fullContent;
+                      } else if (parsed.type === 'message_stop') {
+                        finishReason = parsed.stop_reason || 'end_turn';
+                      } else if (parsed.type === 'message_delta' && parsed.usage) {
+                        usageData = parsed.usage;
+                      }
+                    } catch {
+                      // Ignore parse errors
+                    }
                   }
-                } catch {
-                  // Ignore parse errors
+                } else {
+                  // OpenAI streaming format
+                  if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') continue;
+                    
+                    try {
+                      const parsed = JSON.parse(data);
+                      if (parsed.choices?.[0]?.delta?.content) {
+                        fullContent += parsed.choices[0].delta.content;
+                        streamingContent = fullContent;
+                      }
+                      if (parsed.choices?.[0]?.finish_reason) {
+                        finishReason = parsed.choices[0].finish_reason;
+                      }
+                      if (parsed.usage) {
+                        usageData = parsed.usage;
+                      }
+                    } catch {
+                      // Ignore parse errors
+                    }
+                  }
                 }
               }
             }
+          } catch (streamErr) {
+            console.error('Stream error:', streamErr);
           }
         }
         
         response = {
           success: true,
-          content: streamingContent,
-          provider: res.headers.get('X-Provider') || undefined,
-          targetModel: res.headers.get('X-Target-Model') || undefined,
+          content: fullContent,
+          provider: 'router',
+          duration,
+          usage: usageData ? {
+            prompt_tokens: usageData.input_tokens || usageData.prompt_tokens || 0,
+            completion_tokens: usageData.output_tokens || usageData.completion_tokens || 0,
+            total_tokens: (usageData.input_tokens || usageData.prompt_tokens || 0) + 
+                         (usageData.output_tokens || usageData.completion_tokens || 0),
+          } : undefined,
         };
       } else {
+        // Non-streaming response
         const data = await res.json();
-        response = data;
+        
+        if (apiFormat === 'anthropic') {
+          // Anthropic format
+          const content = data.content?.[0]?.text || '';
+          response = {
+            success: true,
+            content,
+            provider: 'router',
+            targetModel: data.model,
+            duration,
+            usage: data.usage ? {
+              prompt_tokens: data.usage.input_tokens || 0,
+              completion_tokens: data.usage.output_tokens || 0,
+              total_tokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0),
+            } : undefined,
+          };
+        } else {
+          // OpenAI format
+          const content = data.choices?.[0]?.message?.content || '';
+          response = {
+            success: true,
+            content,
+            provider: 'router',
+            targetModel: data.model,
+            duration,
+            usage: data.usage ? {
+              prompt_tokens: data.usage.prompt_tokens || 0,
+              completion_tokens: data.usage.completion_tokens || 0,
+              total_tokens: data.usage.total_tokens || 0,
+            } : undefined,
+          };
+        }
       }
     } catch (err) {
       response = {
@@ -382,21 +471,16 @@
               </div>
             </div>
 
-            <!-- Endpoint Path -->
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1.5">
-                Endpoint Path
+            <!-- Endpoint Info -->
+            <div class="bg-blue-50 rounded-lg p-3">
+              <label class="block text-xs font-medium text-blue-700 mb-1">
+                Endpoint
               </label>
-              <select
-                bind:value={endpointPath}
-                class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-              >
-                {#each endpointOptions as opt}
-                  <option value={opt.value}>{opt.label}</option>
-                {/each}
-              </select>
-              <p class="text-xs text-gray-500 mt-1">
-                The API endpoint path appended to the provider's base URL
+              <code class="text-sm text-blue-900 font-mono">
+                {getEndpointInfo(apiFormat).path}
+              </code>
+              <p class="text-xs text-blue-600 mt-1">
+                {getEndpointInfo(apiFormat).name}
               </p>
             </div>
 
