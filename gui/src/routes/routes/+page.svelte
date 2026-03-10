@@ -9,9 +9,9 @@
     AlertCircle, 
     CheckCircle,
     Search,
-    Star,
     X,
-    Loader2
+    Loader2,
+    GripVertical
   } from '@lucide/svelte';
   import { routes, providers, isLoadingRoutes, unroutedRequests } from '$lib/stores';
   import { routesApi, providersApi, modelsApi } from '$lib/utils/api';
@@ -29,13 +29,16 @@
   let newPattern = $state('');
   let newProvider = $state('');
   let newModel = $state('');
-  let newPriority = $state(50);
   let providerModels = $state<ModelInfo[]>([]);
   let loadingModels = $state(false);
 
   // Models cache for existing routes when editing
   let routeProviderModels = $state<Record<string, ModelInfo[]>>({});
   let loadingRouteModels = $state<Record<string, boolean>>({});
+
+  // Drag and drop state
+  let draggedIndex = $state<number | null>(null);
+  let dragOverIndex = $state<number | null>(null);
 
   // Get model from URL query params (when coming from unrouted requests)
   $effect(() => {
@@ -54,7 +57,8 @@
         providersApi.getAll(),
       ]);
       
-      editingRoutes = [...routesData.routes];
+      // Sort routes by priority (highest first) when loading
+      editingRoutes = [...routesData.routes].sort((a, b) => (b.priority || 0) - (a.priority || 0));
       providers.set(providersData.registered);
       
       // Preload models for each unique provider in routes
@@ -106,15 +110,13 @@
   function addRoute() {
     if (!newPattern.trim() || !newProvider) return;
     
+    // Add new route at the end (lowest priority)
     editingRoutes.push({
       pattern: newPattern.trim(),
       provider: newProvider,
       model: newModel || undefined,
-      priority: newPriority,
+      priority: 0, // Will be calculated on save
     });
-    
-    // Sort by priority
-    editingRoutes.sort((a, b) => (b.priority || 0) - (a.priority || 0));
     
     editingRoutes = editingRoutes;
     hasChanges = true;
@@ -129,7 +131,6 @@
     newPattern = '';
     newProvider = '';
     newModel = '';
-    newPriority = 50;
     providerModels = [];
   }
 
@@ -172,17 +173,86 @@
     saveSuccess = false;
   }
 
+  // Calculate priorities based on array order (first = highest priority)
+  function calculatePriorities(): RouteConfig[] {
+    const count = editingRoutes.length;
+    if (count === 0) return [];
+    
+    // Distribute priorities evenly from 100 down to 1
+    return editingRoutes.map((route, index) => ({
+      ...route,
+      priority: Math.max(1, Math.round(100 - (index * (99 / (count - 1 || 1))))),
+    }));
+  }
+
   async function saveRoutes() {
     saveError = null;
     try {
-      await routesApi.update(editingRoutes);
-      routes.set(editingRoutes);
+      // Calculate priorities before saving
+      const routesToSave = calculatePriorities();
+      await routesApi.update(routesToSave);
+      routes.set(routesToSave);
+      editingRoutes = routesToSave;
       hasChanges = false;
       saveSuccess = true;
       setTimeout(() => saveSuccess = false, 3000);
     } catch (err) {
       saveError = err instanceof Error ? err.message : 'Failed to save routes';
     }
+  }
+
+  // Drag and drop handlers
+  function handleDragStart(index: number) {
+    draggedIndex = index;
+  }
+
+  function handleDragOver(e: DragEvent, index: number) {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === index) return;
+    dragOverIndex = index;
+  }
+
+  function handleDragLeave() {
+    dragOverIndex = null;
+  }
+
+  function handleDrop(e: DragEvent, targetIndex: number) {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === targetIndex) {
+      draggedIndex = null;
+      dragOverIndex = null;
+      return;
+    }
+
+    // Reorder routes
+    const [movedRoute] = editingRoutes.splice(draggedIndex, 1);
+    editingRoutes.splice(targetIndex, 0, movedRoute);
+    
+    // Update models cache to match new indices
+    const newRouteProviderModels: Record<string, ModelInfo[]> = {};
+    const newLoadingRouteModels: Record<string, boolean> = {};
+    editingRoutes.forEach((_, newIndex) => {
+      const oldIndex = Object.keys(routeProviderModels).find(key => 
+        editingRoutes[newIndex] === editingRoutes[parseInt(key)]
+      );
+      if (oldIndex !== undefined) {
+        newRouteProviderModels[newIndex] = routeProviderModels[oldIndex];
+        newLoadingRouteModels[newIndex] = loadingRouteModels[oldIndex];
+      }
+    });
+    routeProviderModels = newRouteProviderModels;
+    loadingRouteModels = newLoadingRouteModels;
+    
+    editingRoutes = editingRoutes;
+    hasChanges = true;
+    saveSuccess = false;
+    draggedIndex = null;
+    dragOverIndex = null;
+  }
+
+  function handleDragEnd() {
+    draggedIndex = null;
+    dragOverIndex = null;
   }
 
   function getSuggestedPattern(model: string): string {
@@ -230,14 +300,6 @@
     newPattern = getSuggestedPattern(request.model);
     isAdding = true;
   }
-
-  const priorityHelp = [
-    { range: '100+', desc: 'Exact matches, critical routes', color: 'red' },
-    { range: '70-99', desc: 'High priority (e.g., GPT-4, Claude)', color: 'orange' },
-    { range: '50-69', desc: 'Medium priority (e.g., specific providers)', color: 'yellow' },
-    { range: '30-49', desc: 'Low priority (e.g., generic patterns)', color: 'green' },
-    { range: '0-29', desc: 'Fallback routes', color: 'gray' },
-  ];
 
   onMount(() => {
     loadData();
@@ -299,7 +361,7 @@
       <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
         <h2 class="text-lg font-semibold text-gray-900">Routing Rules</h2>
         <p class="text-sm text-gray-600 mt-1">
-          Routes are checked in priority order (highest first). First match wins.
+          Drag to reorder (top = highest priority). First matching route wins.
         </p>
       </div>
 
@@ -314,7 +376,7 @@
           <table class="w-full">
             <thead class="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Priority</th>
+                <th class="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-10"></th>
                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pattern</th>
                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-48">Provider</th>
                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Model Mapping</th>
@@ -323,16 +385,17 @@
             </thead>
             <tbody class="divide-y divide-gray-200">
               {#each editingRoutes as route, index}
-                <tr class="hover:bg-gray-50">
-                  <td class="px-4 py-3">
-                    <input
-                      type="number"
-                      min="0"
-                      max="1000"
-                      value={route.priority || 0}
-                      oninput={(e) => updateRoute(index, { priority: parseInt(e.currentTarget.value) || 0 })}
-                      class="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
+                <tr 
+                  class="hover:bg-gray-50 transition-colors {draggedIndex === index ? 'opacity-50' : ''} {dragOverIndex === index ? 'bg-blue-50 border-t-2 border-blue-300' : ''}"
+                  draggable="true"
+                  ondragstart={() => handleDragStart(index)}
+                  ondragover={(e) => handleDragOver(e, index)}
+                  ondragleave={handleDragLeave}
+                  ondrop={(e) => handleDrop(e, index)}
+                  ondragend={handleDragEnd}
+                >
+                  <td class="px-2 py-3 cursor-move">
+                    <GripVertical size={18} class="text-gray-400" />
                   </td>
                   <td class="px-4 py-3">
                     <input
@@ -359,25 +422,25 @@
                         <Loader2 size={14} class="animate-spin" />
                         Loading...
                       </div>
-                    {:else if routeProviderModels[index] && routeProviderModels[index].length > 0}
-                      <select
-                        value={route.model || ''}
-                        onchange={(e) => updateRoute(index, { model: e.currentTarget.value || undefined })}
-                        class="w-full px-2 py-1 text-sm font-mono border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      >
-                        <option value="">Auto (same as pattern)</option>
-                        {#each routeProviderModels[index] as model}
-                          <option value={model.id}>{model.id}</option>
-                        {/each}
-                      </select>
                     {:else}
+                      {@const modelsList = routeProviderModels[index] || []}
+                      {@const datalistId = `models-${index}`}
                       <input
                         type="text"
                         value={route.model || ''}
                         oninput={(e) => updateRoute(index, { model: e.currentTarget.value || undefined })}
-                        placeholder={routeProviderModels[index] ? "Provider has no models - type custom" : "Auto"}
+                        placeholder="Auto (same as pattern)"
+                        list={modelsList.length > 0 ? datalistId : undefined}
                         class="w-full px-2 py-1 text-sm font-mono border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       />
+                      {#if modelsList.length > 0}
+                        <datalist id={datalistId}>
+                          <option value="">Auto (same as pattern)</option>
+                          {#each modelsList as model}
+                            <option value={model.id}>{model.id}</option>
+                          {/each}
+                        </datalist>
+                      {/if}
                     {/if}
                   </td>
                   <td class="px-4 py-3 text-right">
@@ -396,14 +459,8 @@
               <!-- Add New Route Row -->
               {#if isAdding}
                 <tr class="bg-blue-50">
-                  <td class="px-4 py-3">
-                    <input
-                      type="number"
-                      min="0"
-                      max="1000"
-                      bind:value={newPriority}
-                      class="w-20 px-2 py-1 text-sm border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
+                  <td class="px-2 py-3">
+                    <GripVertical size={18} class="text-gray-300" />
                   </td>
                   <td class="px-4 py-3">
                     <input
@@ -431,24 +488,24 @@
                         <Loader2 size={14} class="animate-spin" />
                         Loading models...
                       </div>
-                    {:else if newProvider && providerModels.length > 0}
-                      <select
-                        bind:value={newModel}
-                        class="w-full px-2 py-1 text-sm font-mono border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      >
-                        <option value="">Auto (same as pattern)</option>
-                        {#each providerModels as model}
-                          <option value={model.id}>{model.id}</option>
-                        {/each}
-                      </select>
                     {:else}
+                      {@const datalistId = `new-route-models`}
                       <input
                         type="text"
                         bind:value={newModel}
-                        placeholder={newProvider ? "Provider has no models endpoint - type custom mapping" : "Select provider first"}
+                        placeholder={newProvider ? "Select or type custom mapping (e.g., ${1})" : "Select provider first"}
                         disabled={!newProvider}
+                        list={providerModels.length > 0 ? datalistId : undefined}
                         class="w-full px-2 py-1 text-sm font-mono border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                       />
+                      {#if providerModels.length > 0}
+                        <datalist id={datalistId}>
+                          <option value="">Auto (same as pattern)</option>
+                          {#each providerModels as model}
+                            <option value={model.id}>{model.id}</option>
+                          {/each}
+                        </datalist>
+                      {/if}
                     {/if}
                   </td>
                   <td class="px-4 py-3 text-right">
@@ -549,45 +606,6 @@
             </table>
           </div>
         {/if}
-      </div>
-    </div>
-
-    <!-- Priority Guide -->
-    <div class="bg-white rounded-xl border border-gray-200 p-6">
-      <h3 class="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-        <Star size={20} class="text-yellow-500" />
-        Priority Guide
-      </h3>
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        {#each priorityHelp as help}
-          <div class="p-3 rounded-lg border" 
-            class:bg-red-50={help.color === 'red'}
-            class:bg-orange-50={help.color === 'orange'}
-            class:bg-yellow-50={help.color === 'yellow'}
-            class:bg-green-50={help.color === 'green'}
-            class:bg-gray-50={help.color === 'gray'}
-            class:border-red-200={help.color === 'red'}
-            class:border-orange-200={help.color === 'orange'}
-            class:border-yellow-200={help.color === 'yellow'}
-            class:border-green-200={help.color === 'green'}
-            class:border-gray-200={help.color === 'gray'}
-          >
-            <div class="font-semibold"
-              class:text-red-700={help.color === 'red'}
-              class:text-orange-700={help.color === 'orange'}
-              class:text-yellow-700={help.color === 'yellow'}
-              class:text-green-700={help.color === 'green'}
-              class:text-gray-700={help.color === 'gray'}
-            >{help.range}</div>
-            <div class="text-sm mt-1"
-              class:text-red-600={help.color === 'red'}
-              class:text-orange-600={help.color === 'orange'}
-              class:text-yellow-600={help.color === 'yellow'}
-              class:text-green-600={help.color === 'green'}
-              class:text-gray-600={help.color === 'gray'}
-            >{help.desc}</div>
-          </div>
-        {/each}
       </div>
     </div>
 

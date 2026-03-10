@@ -24,6 +24,14 @@
   let saveError: string | null = $state(null);
   let saveSuccess = $state(false);
 
+  // Auth preset options
+  const authPresets = [
+    { label: 'Bearer Token (OpenAI-style)', header: 'Authorization', prefix: 'Bearer ' },
+    { label: 'API Key (Anthropic-style)', header: 'x-api-key', prefix: '' },
+    { label: 'Google API Key', header: 'x-goog-api-key', prefix: '' },
+    { label: 'Custom', header: '', prefix: '' },
+  ];
+
   const categories = [
     { id: 'cloud', label: 'Cloud Providers', icon: Cloud, color: 'blue' },
     { id: 'local', label: 'Local Providers', icon: Home, color: 'green' },
@@ -106,6 +114,25 @@
     return $providers.find(p => p.id === providerId)?.configured ?? false;
   }
 
+  // Get the matching preset for current auth header/prefix
+  function getAuthPresetId(header: string, prefix: string): string {
+    const match = authPresets.find(p => 
+      p.header.toLowerCase() === (header || '').toLowerCase() && 
+      p.prefix === (prefix || '')
+    );
+    return match ? `${match.header}|${match.prefix}` : 'custom';
+  }
+
+  // Apply auth preset selection
+  function applyAuthPreset(providerId: string, presetValue: string) {
+    if (presetValue === 'custom') return;
+    const [header, prefix] = presetValue.split('|');
+    updateProvider(providerId, { 
+      authHeader: header,
+      authPrefix: prefix
+    });
+  }
+
   onMount(() => {
     loadProviders();
   });
@@ -166,6 +193,7 @@
             {#each categoryProviders as provider}
               {@const editing = editingProviders[provider.id] || {}}
               {@const configured = isConfigured(provider.id)}
+              {@const currentPreset = getAuthPresetId(editing.authHeader || provider.authHeader, editing.authPrefix || provider.authPrefix)}
               <div class="p-6">
                 <div class="flex items-start justify-between mb-4">
                   <div class="flex items-center gap-3">
@@ -205,96 +233,77 @@
                     />
                   </div>
 
-                  <!-- API Key -->
-                  {#if provider.requiresApiKey}
-                    <div>
-                      <label for="{provider.id}-apiKey" class="block text-sm font-medium text-gray-700 mb-1">
-                        <span class="flex items-center gap-1">
-                          <Key size={14} />
-                          API Key (optional)
-                        </span>
-                      </label>
-                      <div class="relative">
-                        <input
-                          id="{provider.id}-apiKey"
-                          type={showApiKeys[provider.id] ? 'text' : 'password'}
-                          value={editing.apiKey || ''}
-                          placeholder="Leave empty to use env var"
-                          oninput={(e) => updateProvider(provider.id, { apiKey: e.currentTarget.value })}
-                          class="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                        />
-                        <button
-                          type="button"
-                          onclick={() => showApiKeys[provider.id] = !showApiKeys[provider.id]}
-                          class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                          aria-label={showApiKeys[provider.id] ? 'Hide API key' : 'Show API key'}
-                        >
-                          {#if showApiKeys[provider.id]}
-                            <EyeOff size={16} />
-                          {:else}
-                            <Eye size={16} />
-                          {/if}
-                        </button>
-                      </div>
-                    </div>
-
-                    <!-- Environment Variable -->
-                    <div>
-                      <label for="{provider.id}-apiKeyEnv" class="block text-sm font-medium text-gray-700 mb-1">
-                        Environment Variable
-                      </label>
+                  <!-- API Key (now shown for all providers) -->
+                  <div>
+                    <label for="{provider.id}-apiKey" class="block text-sm font-medium text-gray-700 mb-1">
+                      <span class="flex items-center gap-1">
+                        <Key size={14} />
+                        API Key (optional)
+                      </span>
+                    </label>
+                    <div class="relative">
                       <input
-                        id="{provider.id}-apiKeyEnv"
-                        type="text"
-                        value={editing.apiKeyEnv || provider.defaultApiKeyEnv || ''}
-                        oninput={(e) => updateProvider(provider.id, { apiKeyEnv: e.currentTarget.value })}
-                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                        id="{provider.id}-apiKey"
+                        type={showApiKeys[provider.id] ? 'text' : 'password'}
+                        value={editing.apiKey || ''}
+                        placeholder={provider.requiresApiKey ? 'Required' : 'Optional'}
+                        oninput={(e) => updateProvider(provider.id, { apiKey: e.currentTarget.value })}
+                        class="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                       />
+                      <button
+                        type="button"
+                        onclick={() => showApiKeys[provider.id] = !showApiKeys[provider.id]}
+                        class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        aria-label={showApiKeys[provider.id] ? 'Hide API key' : 'Show API key'}
+                      >
+                        {#if showApiKeys[provider.id]}
+                          <EyeOff size={16} />
+                        {:else}
+                          <Eye size={16} />
+                        {/if}
+                      </button>
                     </div>
-                  {/if}
+                  </div>
 
-                  <!-- Timeout -->
+                  <!-- Environment Variable -->
                   <div>
-                    <label for="{provider.id}-timeout" class="block text-sm font-medium text-gray-700 mb-1">
-                      Timeout (seconds)
+                    <label for="{provider.id}-apiKeyEnv" class="block text-sm font-medium text-gray-700 mb-1">
+                      Environment Variable
                     </label>
                     <input
-                      id="{provider.id}-timeout"
-                      type="number"
-                      value={editing.timeout || 120}
-                      min="1"
-                      max="600"
-                      oninput={(e) => updateProvider(provider.id, { timeout: parseInt(e.currentTarget.value) })}
+                      id="{provider.id}-apiKeyEnv"
+                      type="text"
+                      value={editing.apiKeyEnv || provider.defaultApiKeyEnv || ''}
+                      placeholder={provider.defaultApiKeyEnv || 'e.g., MY_API_KEY'}
+                      oninput={(e) => updateProvider(provider.id, { apiKeyEnv: e.currentTarget.value })}
                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                     />
                   </div>
 
-                  <!-- Auth Header -->
+                  <!-- Auth Type (condensed header + prefix into datalist) -->
                   <div>
-                    <label for="{provider.id}-authHeader" class="block text-sm font-medium text-gray-700 mb-1">
-                      Auth Header
+                    <label for="{provider.id}-authType" class="block text-sm font-medium text-gray-700 mb-1">
+                      Authentication Type
                     </label>
                     <input
-                      id="{provider.id}-authHeader"
+                      id="{provider.id}-authType"
                       type="text"
-                      value={editing.authHeader || provider.authHeader}
-                      oninput={(e) => updateProvider(provider.id, { authHeader: e.currentTarget.value })}
+                      list="auth-presets"
+                      value={currentPreset === 'custom' ? `${editing.authHeader || provider.authHeader}|${editing.authPrefix || provider.authPrefix}` : currentPreset}
+                      oninput={(e) => applyAuthPreset(provider.id, e.currentTarget.value)}
                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                     />
-                  </div>
-
-                  <!-- Auth Prefix -->
-                  <div>
-                    <label for="{provider.id}-authPrefix" class="block text-sm font-medium text-gray-700 mb-1">
-                      Auth Prefix
-                    </label>
-                    <input
-                      id="{provider.id}-authPrefix"
-                      type="text"
-                      value={editing.authPrefix || provider.authPrefix}
-                      oninput={(e) => updateProvider(provider.id, { authPrefix: e.currentTarget.value })}
-                      class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    />
+                    <datalist id="auth-presets">
+                      {#each authPresets as preset}
+                        {#if preset.label !== 'Custom'}
+                          <option value="{preset.header}|{preset.prefix}">{preset.label}</option>
+                        {/if}
+                      {/each}
+                    </datalist>
+                    <p class="text-xs text-gray-500 mt-1">
+                      Header: <code>{editing.authHeader || provider.authHeader}</code>, 
+                      Prefix: <code>"{editing.authPrefix || provider.authPrefix}"</code>
+                    </p>
                   </div>
                 </div>
 
@@ -342,6 +351,7 @@
       {:else}
         <div class="divide-y divide-gray-200">
           {#each getCustomProviders() as { id, config: customConfig }}
+            {@const currentPreset = getAuthPresetId(customConfig.authHeader, customConfig.authPrefix)}
             <div class="p-6">
               <div class="flex items-center justify-between mb-4">
                 <h3 class="font-semibold text-gray-900">{id}</h3>
@@ -384,7 +394,7 @@
 
                 <div>
                   <label for="{id}-apiKey" class="block text-sm font-medium text-gray-700 mb-1">
-                    API Key
+                    API Key (optional)
                   </label>
                   <input
                     id="{id}-apiKey"
@@ -396,44 +406,45 @@
                   />
                 </div>
 
+                <!-- Auth Type (condensed) -->
                 <div>
-                  <label for="{id}-authHeader" class="block text-sm font-medium text-gray-700 mb-1">
-                    Auth Header
+                  <label for="{id}-authType" class="block text-sm font-medium text-gray-700 mb-1">
+                    Authentication Type
                   </label>
                   <input
-                    id="{id}-authHeader"
+                    id="{id}-authType"
                     type="text"
-                    value={customConfig.authHeader || 'Authorization'}
-                    oninput={(e) => updateProvider(id, { authHeader: e.currentTarget.value })}
+                    list="auth-presets-custom"
+                    value={currentPreset === 'custom' ? `${customConfig.authHeader || 'Authorization'}|${customConfig.authPrefix || 'Bearer '}` : currentPreset}
+                    oninput={(e) => applyAuthPreset(id, e.currentTarget.value)}
                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                   />
+                  <datalist id="auth-presets-custom">
+                    {#each authPresets as preset}
+                      {#if preset.label !== 'Custom'}
+                        <option value="{preset.header}|{preset.prefix}">{preset.label}</option>
+                      {/if}
+                    {/each}
+                  </datalist>
+                  <p class="text-xs text-gray-500 mt-1">
+                    Header: <code>{customConfig.authHeader || 'Authorization'}</code>, 
+                    Prefix: <code>"{customConfig.authPrefix || 'Bearer '}"</code>
+                  </p>
                 </div>
+              </div>
 
-                <div>
-                  <label for="{id}-authPrefix" class="block text-sm font-medium text-gray-700 mb-1">
-                    Auth Prefix
-                  </label>
-                  <input
-                    id="{id}-authPrefix"
-                    type="text"
-                    value={customConfig.authPrefix || 'Bearer '}
-                    oninput={(e) => updateProvider(id, { authPrefix: e.currentTarget.value })}
-                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label for="{id}-timeout" class="block text-sm font-medium text-gray-700 mb-1">
-                    Timeout (seconds)
-                  </label>
-                  <input
-                    id="{id}-timeout"
-                    type="number"
-                    value={customConfig.timeout || 120}
-                    oninput={(e) => updateProvider(id, { timeout: parseInt(e.currentTarget.value) })}
-                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  />
-                </div>
+              <!-- Streaming Support for Custom -->
+              <div class="mt-4 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="{id}-streaming"
+                  checked={customConfig.supportsStreaming !== false}
+                  onchange={(e) => updateProvider(id, { supportsStreaming: e.currentTarget.checked })}
+                  class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <label for="{id}-streaming" class="text-sm text-gray-700">
+                  Supports streaming responses
+                </label>
               </div>
             </div>
           {/each}
@@ -457,8 +468,12 @@
           For better security, use environment variables (e.g., <code>OPENAI_API_KEY</code>).
         </p>
         <p>
-          <strong>Local Providers:</strong> Ollama, LM Studio, and llama.cpp don't require API keys 
-          as they run locally on your machine.
+          <strong>Local Providers:</strong> Ollama, LM Studio, and llama.cpp typically don't require API keys 
+          as they run locally on your machine, but you can still configure one if needed.
+        </p>
+        <p>
+          <strong>Authentication Types:</strong> Choose from presets like Bearer Token (OpenAI-style), 
+          API Key (Anthropic-style), or enter a custom header/prefix combination.
         </p>
       </div>
     </div>

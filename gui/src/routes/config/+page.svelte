@@ -194,7 +194,7 @@
           <ul class="space-y-1 list-disc list-inside">
             <li><code>server.port</code> - HTTP port (default: 3000)</li>
             <li><code>server.host</code> - Bind address (default: 0.0.0.0)</li>
-            <li><code>server.timeout</code> - Request timeout in seconds</li>
+            <li><code>server.timeout</code> - Request timeout in seconds (default: 120)</li>
             <li><code>server.cors.origin</code> - CORS allowed origins</li>
           </ul>
         </div>
@@ -204,7 +204,8 @@
             <li><code>baseUrl</code> - Provider API endpoint</li>
             <li><code>apiKey</code> - Direct API key (optional)</li>
             <li><code>apiKeyEnv</code> - Environment variable name</li>
-            <li><code>timeout</code> - Provider-specific timeout</li>
+            <li><code>authHeader</code> - Authentication header name</li>
+            <li><code>authPrefix</code> - Authentication prefix (e.g., "Bearer ")</li>
           </ul>
         </div>
       </div>
