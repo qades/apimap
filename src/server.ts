@@ -437,6 +437,10 @@ async function handleRequest(
       logEntry.durationMs = Date.now() - startTime;
       await state.logging.log(logEntry);
 
+      // Update tracking with error
+      updateRequest(requestId, { status: 'error', error: `HTTP ${response.status}`, endTime: Date.now() });
+      cleanupOldRequests();
+
       return jsonResponse(
         { error: "Upstream error", details: errorText },
         response.status,
