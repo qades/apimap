@@ -33,6 +33,10 @@
   let providerModels = $state<ModelInfo[]>([]);
   let loadingModels = $state(false);
 
+  // Models cache for existing routes when editing
+  let routeProviderModels = $state<Record<string, ModelInfo[]>>({});
+  let loadingRouteModels = $state<Record<string, boolean>>({});
+
   // Get model from URL query params (when coming from unrouted requests)
   $effect(() => {
     const urlModel = $page.url.searchParams.get('model');
@@ -52,6 +56,24 @@
       
       editingRoutes = [...routesData.routes];
       providers.set(providersData.registered);
+      
+      // Preload models for each unique provider in routes
+      const uniqueProviders = new Set(editingRoutes.map(r => r.provider).filter(Boolean));
+      for (const providerId of uniqueProviders) {
+        const indices = editingRoutes
+          .map((r, i) => r.provider === providerId ? i : -1)
+          .filter(i => i >= 0);
+        
+        // Load models once per provider and assign to all matching routes
+        try {
+          const result = await modelsApi.getAll({ source: 'provider', provider: providerId });
+          for (const index of indices) {
+            routeProviderModels[index] = result.models;
+          }
+        } catch (err) {
+          console.log(`Provider ${providerId} has no models endpoint`);
+        }
+      }
     } catch (err) {
       console.error('Failed to load data:', err);
     } finally {
@@ -111,10 +133,36 @@
     providerModels = [];
   }
 
+  async function loadModelsForRoute(providerId: string, routeIndex: number) {
+    if (!providerId) {
+      routeProviderModels[routeIndex] = [];
+      return;
+    }
+    
+    loadingRouteModels[routeIndex] = true;
+    try {
+      const result = await modelsApi.getAll({ source: 'provider', provider: providerId });
+      routeProviderModels[routeIndex] = result.models;
+    } catch (err) {
+      console.error('Failed to fetch models for route:', err);
+      routeProviderModels[routeIndex] = [];
+    } finally {
+      loadingRouteModels[routeIndex] = false;
+    }
+  }
+
   function updateRoute(index: number, updates: Partial<RouteConfig>) {
     editingRoutes[index] = { ...editingRoutes[index], ...updates };
     hasChanges = true;
     saveSuccess = false;
+    
+    // If provider changed, fetch models for the new provider
+    if ('provider' in updates) {
+      // Reset model when provider changes
+      editingRoutes[index].model = undefined;
+      // Load models for new provider
+      loadModelsForRoute(updates.provider || '', index);
+    }
   }
 
   function removeRoute(index: number) {
@@ -306,13 +354,31 @@
                     </select>
                   </td>
                   <td class="px-4 py-3">
-                    <input
-                      type="text"
-                      value={route.model || ''}
-                      oninput={(e) => updateRoute(index, { model: e.currentTarget.value || undefined })}
-                      placeholder="Auto"
-                      class="w-full px-2 py-1 text-sm font-mono border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
+                    {#if loadingRouteModels[index]}
+                      <div class="flex items-center gap-2 text-sm text-gray-500">
+                        <Loader2 size={14} class="animate-spin" />
+                        Loading...
+                      </div>
+                    {:else if routeProviderModels[index] && routeProviderModels[index].length > 0}
+                      <select
+                        value={route.model || ''}
+                        onchange={(e) => updateRoute(index, { model: e.currentTarget.value || undefined })}
+                        class="w-full px-2 py-1 text-sm font-mono border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">Auto (same as pattern)</option>
+                        {#each routeProviderModels[index] as model}
+                          <option value={model.id}>{model.id}</option>
+                        {/each}
+                      </select>
+                    {:else}
+                      <input
+                        type="text"
+                        value={route.model || ''}
+                        oninput={(e) => updateRoute(index, { model: e.currentTarget.value || undefined })}
+                        placeholder={routeProviderModels[index] ? "Provider has no models - type custom" : "Auto"}
+                        class="w-full px-2 py-1 text-sm font-mono border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    {/if}
                   </td>
                   <td class="px-4 py-3 text-right">
                     <button

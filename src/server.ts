@@ -692,7 +692,8 @@ async function createStreamingResponse(
         await writer.write(encoder.encode("data: [DONE]\n\n"));
       }
 
-      logEntry.responseBody = { type: "streaming", chunkCount: chunkIndex };
+      // Store the full concatenated response instead of just streaming metadata
+      logEntry.responseBody = fullContent || { type: "streaming", chunkCount: chunkIndex };
       logEntry.durationMs = Date.now() - startTime;
       state.logging.log(logEntry).catch(console.error);
       
@@ -730,9 +731,9 @@ async function createStreamingResponse(
         }
       }
       
-      // Update log entry with info
+      // Update log entry with info - include full content if available
       logEntry.error = isClientDisconnect ? undefined : errorMessage;
-      logEntry.responseBody = { type: "streaming", chunkCount: chunkIndex, aborted: true };
+      logEntry.responseBody = fullContent || { type: "streaming", chunkCount: chunkIndex, aborted: true };
       logEntry.durationMs = Date.now() - startTime;
       state.logging.log(logEntry).catch(console.error);
       
@@ -1205,20 +1206,25 @@ async function handleGetModels(url: URL, headers: Record<string, string>): Promi
         const provider = providerRegistry.get(providerId);
         if (!provider) continue;
         
-        const info = provider.getInfo();
-        const baseUrl = providerConfig.baseUrl || info.defaultBaseUrl;
+        // Use the provider's getModelsUrl method to get the correct URL
+        const modelsUrl = provider.getModelsUrl();
+        if (!modelsUrl) continue;
         
-        // Try to fetch models from the provider's /models endpoint
-        const modelsUrl = `${baseUrl.replace(/\/$/, '')}/models`;
+        // Use the provider's getHeaders() method to get correct auth headers
+        const headers = provider.getHeaders();
+        
         const response = await fetch(modelsUrl, {
           method: 'GET',
-          headers: {
-            ...(providerConfig.apiKey ? { 'Authorization': `Bearer ${providerConfig.apiKey}` } : {}),
-          },
+          headers,
         });
         
         if (response.ok) {
-          const data = await response.json() as { data?: Array<{ id: string; description?: string }> };
+          const data = await response.json() as { 
+            data?: Array<{ id: string; description?: string }>;
+            models?: Array<{ id?: string; name?: string; description?: string; model?: string }>;
+          };
+          
+          // Handle OpenAI-style response format (data array)
           if (data.data && Array.isArray(data.data)) {
             for (const model of data.data) {
               if (!seen.has(model.id)) {
@@ -1226,6 +1232,22 @@ async function handleGetModels(url: URL, headers: Record<string, string>): Promi
                 models.push({
                   id: model.id,
                   name: model.id,
+                  source: 'provider',
+                  provider: providerId,
+                  description: model.description,
+                });
+              }
+            }
+          }
+          // Handle Ollama-style response format (models array)
+          else if (data.models && Array.isArray(data.models)) {
+            for (const model of data.models) {
+              const modelId = model.id || model.name || model.model || '';
+              if (modelId && !seen.has(modelId)) {
+                seen.add(modelId);
+                models.push({
+                  id: modelId,
+                  name: modelId,
                   source: 'provider',
                   provider: providerId,
                   description: model.description,

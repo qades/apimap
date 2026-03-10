@@ -16,7 +16,9 @@
     Maximize2,
     Minimize2,
     X,
-    MessageSquare
+    MessageSquare,
+    ChevronDown,
+    ChevronUp
   } from '@lucide/svelte';
   import { serverInfoApi } from '$lib/utils/api';
 
@@ -48,12 +50,14 @@
   let autoScroll = $state(true);
   let showOnlyRunning = $state(false);
   let expandedRequest = $state<string | null>(null);
+  let expandedPrompts = $state<Set<string>>(new Set());
 
-  // Filtered requests
+  // Filtered requests - sorted by timestamp descending (latest first)
   let filteredRequests = $derived(
-    showOnlyRunning 
+    (showOnlyRunning 
       ? requests.filter(r => r.status === 'pending' || r.status === 'streaming')
       : requests
+    ).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
   );
 
   // Stats
@@ -181,6 +185,20 @@
 
   function toggleExpand(requestId: string) {
     expandedRequest = expandedRequest === requestId ? null : requestId;
+  }
+
+  function togglePromptExpand(requestId: string) {
+    const newSet = new Set(expandedPrompts);
+    if (newSet.has(requestId)) {
+      newSet.delete(requestId);
+    } else {
+      newSet.add(requestId);
+    }
+    expandedPrompts = newSet;
+  }
+
+  function isPromptExpanded(requestId: string): boolean {
+    return expandedPrompts.has(requestId);
   }
 
   onMount(() => {
@@ -391,8 +409,21 @@
                       <MessageSquare size={12} />
                       Prompt
                     </span>
+                    <button
+                      type="button"
+                      onclick={() => togglePromptExpand(request.requestId)}
+                      class="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                    >
+                      {#if isPromptExpanded(request.requestId)}
+                        <ChevronUp size={14} />
+                        Show less
+                      {:else}
+                        <ChevronDown size={14} />
+                        Show more
+                      {/if}
+                    </button>
                   </div>
-                  <div class="max-h-32 overflow-auto">
+                  <div class={isPromptExpanded(request.requestId) ? 'max-h-96 overflow-auto' : 'max-h-12 overflow-hidden'}>
                     <pre class="text-sm text-blue-900 whitespace-pre-wrap">{request.prompt}</pre>
                   </div>
                 </div>

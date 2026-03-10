@@ -135,6 +135,43 @@ export abstract class BaseProvider {
   }
 
   /**
+   * Get the models endpoint URL for this provider
+   * Returns null if the provider doesn't have a models endpoint
+   */
+  getModelsUrl(): string | null {
+    const baseUrl = this.config.baseUrl;
+    
+    switch (this.id) {
+      case "anthropic":
+        // Anthropic has models at /v1/models
+        return `${baseUrl}/v1/models`;
+      
+      case "google":
+        // Google uses a different models endpoint format
+        return `${baseUrl}/models`;
+      
+      case "ollama":
+        // Ollama has a local models endpoint
+        return `${baseUrl}/api/tags`;
+      
+      case "openai":
+      case "groq":
+      case "together":
+      case "fireworks":
+      case "mistral":
+      case "cohere":
+      case "openrouter":
+      case "deepseek":
+      case "lmstudio":
+      case "llamacpp":
+      case "vllm":
+      default:
+        // OpenAI-compatible providers use /v1/models
+        return `${baseUrl}/models`;
+    }
+  }
+
+  /**
    * Build a request for this provider
    * @param body - The request body
    * @param originalHeaders - Original request headers
