@@ -225,7 +225,14 @@ export interface ModelInfo {
 }
 
 export const modelsApi = {
-  getAll: () => fetchApi<{ models: ModelInfo[] }>('/models'),
+  getAll: (options?: { source?: 'route' | 'provider'; provider?: string }) => {
+    let url = '/models';
+    const params = new URLSearchParams();
+    if (options?.source) params.append('source', options.source);
+    if (options?.provider) params.append('provider', options.provider);
+    if (params.toString()) url += `?${params.toString()}`;
+    return fetchApi<{ models: ModelInfo[] }>(url);
+  },
 };
 
 // Server Info API

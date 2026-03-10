@@ -70,8 +70,9 @@
     
     loadingModels = true;
     try {
-      const allModels = await modelsApi.getAll();
-      providerModels = allModels.models.filter(m => m.provider === providerId);
+      // Fetch only provider models (not route patterns)
+      const result = await modelsApi.getAll({ source: 'provider', provider: providerId });
+      providerModels = result.models;
     } catch (err) {
       console.error('Failed to fetch models:', err);
       providerModels = [];
@@ -364,7 +365,7 @@
                         <Loader2 size={14} class="animate-spin" />
                         Loading models...
                       </div>
-                    {:else if providerModels.length > 0}
+                    {:else if newProvider && providerModels.length > 0}
                       <select
                         bind:value={newModel}
                         class="w-full px-2 py-1 text-sm font-mono border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -378,8 +379,9 @@
                       <input
                         type="text"
                         bind:value={newModel}
-                        placeholder="Auto or custom mapping"
-                        class="w-full px-2 py-1 text-sm font-mono border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder={newProvider ? "Provider has no models endpoint - type custom mapping" : "Select provider first"}
+                        disabled={!newProvider}
+                        class="w-full px-2 py-1 text-sm font-mono border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                       />
                     {/if}
                   </td>

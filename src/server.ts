@@ -46,6 +46,7 @@ interface ActiveRequest {
   sourceScheme: string;
   stream: boolean;
   status: 'pending' | 'streaming' | 'completed' | 'error';
+  prompt?: string;
   content?: string;
   error?: string;
   chunks: number;
@@ -358,6 +359,20 @@ async function handleRequest(
 
   // Track this request for live monitoring
   const streamMode = body.stream === true;
+  
+  // Extract prompt from messages
+  let prompt = '';
+  if (body.messages && Array.isArray(body.messages)) {
+    // Get the last user message
+    const userMessages = body.messages.filter((m: { role?: string; content?: unknown }) => m.role === 'user');
+    if (userMessages.length > 0) {
+      const lastMessage = userMessages[userMessages.length - 1];
+      prompt = typeof lastMessage.content === 'string' 
+        ? lastMessage.content 
+        : JSON.stringify(lastMessage.content);
+    }
+  }
+  
   trackRequest({
     requestId,
     timestamp: new Date().toISOString(),
@@ -367,6 +382,7 @@ async function handleRequest(
     sourceScheme: scheme.format,
     stream: streamMode,
     status: 'pending',
+    prompt,
     chunks: 0,
     startTime,
   });
@@ -841,7 +857,7 @@ function handleManagementAPI(req: Request, url: URL): Promise<Response> | Respon
 
   // Models endpoint - returns available models from all sources
   if (path === "/models" && req.method === "GET") {
-    return handleGetModels(corsHeaders);
+    return handleGetModels(url, corsHeaders);
   }
 
   return new Response(JSON.stringify({ error: "Not found" }), { 
@@ -1137,87 +1153,91 @@ interface ModelInfo {
   description?: string;
 }
 
-async function handleGetModels(headers: Record<string, string>): Promise<Response> {
+async function handleGetModels(url: URL, headers: Record<string, string>): Promise<Response> {
   const models: ModelInfo[] = [];
   const seen = new Set<string>();
+  const providerFilter = url.searchParams.get('provider');
+  const sourceFilter = url.searchParams.get('source'); // 'route', 'provider', or null for all
   
-  // 1. Add models from route patterns (strip wildcards)
-  const routes = state.router.getRoutes();
-  for (const route of routes) {
-    // Generate example models from patterns by stripping wildcards
-    const pattern = route.pattern;
-    const examples: string[] = [];
-    
-    if (pattern.includes('*')) {
-      // For wildcard patterns, add the base pattern without wildcards
-      const basePattern = pattern.replace(/\*/g, '');
-      if (basePattern && !seen.has(basePattern)) {
-        examples.push(basePattern);
+  // 1. Add models from route patterns (only if not filtering to provider-only)
+  if (sourceFilter !== 'provider') {
+    const routes = state.router.getRoutes();
+    for (const route of routes) {
+      // Skip if filtering by provider and doesn't match
+      if (providerFilter && route.provider !== providerFilter) continue;
+      
+      // Generate example models from patterns by stripping wildcards
+      const pattern = route.pattern;
+      const examples: string[] = [];
+      
+      if (pattern.includes('*')) {
+        // For wildcard patterns, add the base pattern without wildcards
+        const basePattern = pattern.replace(/\*/g, '');
+        if (basePattern && !seen.has(basePattern)) {
+          examples.push(basePattern);
+        }
+      } else {
+        examples.push(pattern);
       }
-      // Also add some common variations
-      if (pattern.includes('gpt-4*')) {
-        examples.push('gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo');
-      } else if (pattern.includes('claude*')) {
-        examples.push('claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307');
-      } else if (pattern.includes('local/*')) {
-        examples.push('local/llama2', 'local/mistral', 'local/codellama');
-      }
-    } else {
-      examples.push(pattern);
-    }
-    
-    for (const model of examples) {
-      if (!seen.has(model)) {
-        seen.add(model);
-        models.push({
-          id: model,
-          name: model,
-          source: 'route',
-          provider: route.provider,
-        });
+      
+      for (const model of examples) {
+        if (!seen.has(model)) {
+          seen.add(model);
+          models.push({
+            id: model,
+            name: model,
+            source: 'route',
+            provider: route.provider,
+          });
+        }
       }
     }
   }
   
-  // 2. Fetch models from providers
-  const config = state.config.getConfig();
-  for (const [providerId, providerConfig] of Object.entries(config.providers)) {
-    try {
-      const provider = providerRegistry.get(providerId);
-      if (!provider) continue;
+  // 2. Fetch models from providers (only if not filtering to route-only)
+  if (sourceFilter !== 'route') {
+    const config = state.config.getConfig();
+    for (const [providerId, providerConfig] of Object.entries(config.providers)) {
+      // Skip if filtering by provider and doesn't match
+      if (providerFilter && providerId !== providerFilter) continue;
       
-      const info = provider.getInfo();
-      const baseUrl = providerConfig.baseUrl || info.defaultBaseUrl;
-      
-      // Try to fetch models from the provider's /models endpoint
-      const modelsUrl = `${baseUrl.replace(/\/$/, '')}/models`;
-      const response = await fetch(modelsUrl, {
-        method: 'GET',
-        headers: {
-          ...(providerConfig.apiKey ? { 'Authorization': `Bearer ${providerConfig.apiKey}` } : {}),
-        },
-      });
-      
-      if (response.ok) {
-        const data = await response.json() as { data?: Array<{ id: string; description?: string }> };
-        if (data.data && Array.isArray(data.data)) {
-          for (const model of data.data) {
-            if (!seen.has(model.id)) {
-              seen.add(model.id);
-              models.push({
-                id: model.id,
-                name: model.id,
-                source: 'provider',
-                provider: providerId,
-                description: model.description,
-              });
+      try {
+        const provider = providerRegistry.get(providerId);
+        if (!provider) continue;
+        
+        const info = provider.getInfo();
+        const baseUrl = providerConfig.baseUrl || info.defaultBaseUrl;
+        
+        // Try to fetch models from the provider's /models endpoint
+        const modelsUrl = `${baseUrl.replace(/\/$/, '')}/models`;
+        const response = await fetch(modelsUrl, {
+          method: 'GET',
+          headers: {
+            ...(providerConfig.apiKey ? { 'Authorization': `Bearer ${providerConfig.apiKey}` } : {}),
+          },
+        });
+        
+        if (response.ok) {
+          const data = await response.json() as { data?: Array<{ id: string; description?: string }> };
+          if (data.data && Array.isArray(data.data)) {
+            for (const model of data.data) {
+              if (!seen.has(model.id)) {
+                seen.add(model.id);
+                models.push({
+                  id: model.id,
+                  name: model.id,
+                  source: 'provider',
+                  provider: providerId,
+                  description: model.description,
+                });
+              }
             }
           }
         }
+      } catch (error) {
+        // Provider doesn't support /models endpoint or is unreachable - that's ok
+        console.log(`[models] Could not fetch from ${providerId}: ${error}`);
       }
-    } catch (error) {
-      // Provider doesn't support /models endpoint or is unreachable - that's ok
-      console.log(`[models] Could not fetch from ${providerId}: ${error}`);
     }
   }
   

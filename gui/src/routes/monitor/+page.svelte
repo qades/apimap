@@ -15,7 +15,8 @@
     Pause,
     Maximize2,
     Minimize2,
-    X
+    X,
+    MessageSquare
   } from '@lucide/svelte';
   import { serverInfoApi } from '$lib/utils/api';
 
@@ -28,6 +29,7 @@
     sourceScheme: string;
     stream: boolean;
     status: 'pending' | 'streaming' | 'completed' | 'error';
+    prompt?: string;
     content?: string;
     error?: string;
     chunks: number;
@@ -381,6 +383,21 @@
           <!-- Expanded Content -->
           {#if expandedRequest === request.requestId}
             <div class="border-t border-gray-200">
+              <!-- Request Prompt -->
+              {#if request.prompt}
+                <div class="p-4 bg-blue-50/50 border-b border-gray-200">
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-medium text-blue-700 flex items-center gap-1">
+                      <MessageSquare size={12} />
+                      Prompt
+                    </span>
+                  </div>
+                  <div class="max-h-32 overflow-auto">
+                    <pre class="text-sm text-blue-900 whitespace-pre-wrap">{request.prompt}</pre>
+                  </div>
+                </div>
+              {/if}
+              
               {#if request.status === 'error'}
                 <div class="p-4 bg-red-50">
                   <div class="flex items-start gap-2">
