@@ -1,5 +1,9 @@
 // API client for the management API
-const API_BASE = '/admin';
+// API URL is injected by the GUI server into the HTML
+const API_URL = typeof window !== 'undefined' && (window as any).API_URL 
+  ? (window as any).API_URL 
+  : 'http://localhost:3000';
+const API_BASE = `${API_URL}/admin`;
 
 export interface SystemStatus {
   status: string;
@@ -242,26 +246,18 @@ export interface ServerInfo {
   uptime: number;
 }
 
-let cachedApiUrl: string | null = null;
-
+// API URL is injected by the GUI server into window.API_URL
 export const serverInfoApi = {
   get: () => fetchApi<ServerInfo>('/server-info'),
   
   // Get the API base URL for direct API calls (e.g., /v1/chat/completions)
-  getApiUrl: async (): Promise<string> => {
-    if (cachedApiUrl) return cachedApiUrl;
-    const info = await serverInfoApi.get();
-    cachedApiUrl = info.apiUrl;
-    return cachedApiUrl;
-  },
-  
-  // Clear the cached URL (useful if server config changes)
-  clearCache: () => {
-    cachedApiUrl = null;
+  // Uses the URL injected by the GUI server
+  getApiUrl: (): string => {
+    return API_URL;
   },
 };
 
-// Model Testing API - calls the API endpoints through the GUI server proxy
+// Model Testing API - calls the API endpoints directly
 export const testModelApi = {
   test: async (params: {
     model: string;
@@ -272,6 +268,7 @@ export const testModelApi = {
     stream?: boolean;
     apiFormat?: 'openai' | 'anthropic';
   }) => {
+    const apiUrl = await serverInfoApi.getApiUrl();
     const isAnthropic = params.apiFormat === 'anthropic';
     const endpoint = isAnthropic ? '/v1/messages' : '/v1/chat/completions';
     
@@ -289,9 +286,8 @@ export const testModelApi = {
       stream: params.stream ?? false,
     };
     
-    // Use relative URL to go through the GUI server's proxy
-    // This avoids CORS and connection limit issues
-    return fetch(endpoint, {
+    // Call API server directly
+    return fetch(`${apiUrl}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),

@@ -852,7 +852,7 @@ function handleManagementAPI(req: Request, url: URL): Promise<Response> | Respon
 
   // Server info endpoint (for GUI to know API URL)
   if (path === "/server-info" && req.method === "GET") {
-    return handleGetServerInfo(corsHeaders);
+    return handleGetServerInfo(corsHeaders, apiPort);
   }
 
   // Active requests endpoint (for live monitor)
@@ -1129,15 +1129,13 @@ async function handleUpdateDefaultProvider(req: Request, headers: Record<string,
   }
 }
 
-function handleGetServerInfo(headers: Record<string, string>): Response {
-  const config = state.config.getConfig();
-  const port = config.server?.port || 3000;
+function handleGetServerInfo(headers: Record<string, string>, actualPort: number): Response {
   // Use the same logic as display hostname - prefer actual hostname over localhost
-  const host = getDisplayHostname(undefined, config.server?.host);
+  const host = getDisplayHostname(undefined, state.config.getConfig().server?.host);
   const protocol = "http";
   
   return new Response(JSON.stringify({
-    apiUrl: `${protocol}://${host}:${port}`,
+    apiUrl: `${protocol}://${host}:${actualPort}`,
     version: state.version,
     uptime: Math.floor((Date.now() - state.startTime.getTime()) / 1000),
   }), { headers: { "Content-Type": "application/json", ...headers } });
@@ -1797,28 +1795,6 @@ ${boxBottom()}
         async fetch(req) {
           const url = new URL(req.url);
 
-          // Proxy /v1/* requests to the API server
-          // This allows the GUI to use relative URLs for API calls
-          if (url.pathname.startsWith("/v1/")) {
-            const apiUrl = `http://127.0.0.1:${apiPort}${url.pathname}${url.search}`;
-            try {
-              const proxyResp = await fetch(apiUrl, {
-                method: req.method,
-                headers: req.headers,
-                body: req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
-              });
-              return new Response(proxyResp.body, {
-                status: proxyResp.status,
-                headers: proxyResp.headers,
-              });
-            } catch (error) {
-              return new Response(JSON.stringify({ error: "API server unavailable" }), {
-                status: 502,
-                headers: { "Content-Type": "application/json" },
-              });
-            }
-          }
-
           // Serve static files from gui/build
           let filePath = join(guiDir, url.pathname);
           let file = Bun.file(filePath);
@@ -1830,8 +1806,20 @@ ${boxBottom()}
           }
 
           // SPA fallback to index.html
-          if (!(await file.exists())) {
-            file = Bun.file(join(guiDir, "index.html"));
+          const isSPAFallback = !(await file.exists());
+          if (isSPAFallback) {
+            filePath = join(guiDir, "index.html");
+            file = Bun.file(filePath);
+          }
+
+          // Inject API URL into HTML (using pre-calculated displayHost and apiPort)
+          if (filePath.endsWith("index.html")) {
+            const html = await file.text();
+            const apiUrl = `http://${displayHost}:${apiPort}`;
+            const modifiedHtml = html.replace('{{API_URL}}', apiUrl);
+            return new Response(modifiedHtml, {
+              headers: { "Content-Type": "text/html" },
+            });
           }
 
           return new Response(file);

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { serverInfoApi } from '$lib/utils/api';
   import { onMount, onDestroy } from 'svelte';
   import { 
     Activity, 
@@ -74,10 +75,9 @@
     connecting = true;
     
     try {
-      // Use relative WebSocket URL to connect to same origin as the page
-      // This avoids CORS issues and works through the GUI server proxy
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      // Get API URL and connect to WebSocket on API server
+      const apiUrl = await serverInfoApi.getApiUrl();
+      const wsUrl = apiUrl.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws';
       ws = new WebSocket(wsUrl);
       
       ws.onopen = () => {
