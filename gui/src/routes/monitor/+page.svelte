@@ -53,11 +53,12 @@
   let expandedPrompts = $state<Set<string>>(new Set());
 
   // Filtered requests - sorted by timestamp descending (latest first)
+  // Note: Use slice() to create a copy before sorting to avoid mutating original
   let filteredRequests = $derived(
-    (showOnlyRunning 
+    [...(showOnlyRunning 
       ? requests.filter(r => r.status === 'pending' || r.status === 'streaming')
       : requests
-    ).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    )].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
   );
 
   // Stats
