@@ -777,7 +777,7 @@ function jsonResponse(data: unknown, status: number, config: RouterConfig, origi
 // ============================================================================
 
 function handleManagementAPI(req: Request, url: URL): Promise<Response> | Response {
-  const path = url.pathname.replace("/api/admin", "");
+  const path = url.pathname.replace("/admin", "");
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -852,7 +852,7 @@ function handleManagementAPI(req: Request, url: URL): Promise<Response> | Respon
 
   // Server info endpoint (for GUI to know API URL)
   if (path === "/server-info" && req.method === "GET") {
-    return handleGetServerInfo(corsHeaders, req);
+    return handleGetServerInfo(corsHeaders);
   }
 
   // Active requests endpoint (for live monitor)
@@ -1129,31 +1129,12 @@ async function handleUpdateDefaultProvider(req: Request, headers: Record<string,
   }
 }
 
-function handleGetServerInfo(headers: Record<string, string>, req?: Request): Response {
+function handleGetServerInfo(headers: Record<string, string>): Response {
   const config = state.config.getConfig();
-  const apiPort = config.server?.port || 3000;
+  const port = config.server?.port || 3000;
   // Use the same logic as display hostname - prefer actual hostname over localhost
   const host = getDisplayHostname(undefined, config.server?.host);
   const protocol = "http";
-  
-  // If request came through GUI server, return the same origin to ensure
-  // all API requests go through the GUI server's proxy (avoiding CORS issues)
-  // Otherwise return the API server URL directly
-  let port = apiPort;
-  if (req) {
-    const referer = req.headers.get("referer");
-    if (referer) {
-      try {
-        const refererUrl = new URL(referer);
-        // If referer is from a different port (GUI server), use that port
-        if (refererUrl.port && parseInt(refererUrl.port) !== apiPort) {
-          port = parseInt(refererUrl.port);
-        }
-      } catch {
-        // Invalid referer, fall back to apiPort
-      }
-    }
-  }
   
   return new Response(JSON.stringify({
     apiUrl: `${protocol}://${host}:${port}`,
@@ -1730,7 +1711,7 @@ ${boxBottom()}
       }
 
       // WebSocket upgrade for live monitor
-      if (url.pathname === "/api/admin/ws") {
+      if (url.pathname === "/ws") {
         const upgraded = server.upgrade(req);
         if (upgraded) {
           return undefined;
@@ -1750,7 +1731,7 @@ ${boxBottom()}
       }
 
       // Admin UI redirect (root path only)
-      if (url.pathname === "/api/admin" || url.pathname === "/api/admin/") {
+      if (url.pathname === "/admin" || url.pathname === "/admin/") {
         return new Response(null, {
           status: 302,
           headers: {
@@ -1760,7 +1741,7 @@ ${boxBottom()}
       }
 
       // Management API
-      if (url.pathname.startsWith("/api/admin/")) {
+      if (url.pathname.startsWith("/admin/")) {
         return handleManagementAPI(req, url);
       }
 
@@ -1802,7 +1783,7 @@ ${boxBottom()}
   });
 
   console.log(`API server running at http://${displayHost}:${apiPort}/`);
-  console.log(`Management API at http://${displayHost}:${apiPort}/api/admin/`);
+  console.log(`Management API at http://${displayHost}:${apiPort}/admin/`);
 
   // Start GUI server if enabled
   if (guiPort > 0) {
@@ -1816,8 +1797,9 @@ ${boxBottom()}
         async fetch(req) {
           const url = new URL(req.url);
 
-          // Proxy /api/admin and /v1/* requests to the API server
-          if (url.pathname.startsWith("/api/admin") || url.pathname.startsWith("/v1/")) {
+          // Proxy /v1/* requests to the API server
+          // This allows the GUI to use relative URLs for API calls
+          if (url.pathname.startsWith("/v1/")) {
             const apiUrl = `http://127.0.0.1:${apiPort}${url.pathname}${url.search}`;
             try {
               const proxyResp = await fetch(apiUrl, {

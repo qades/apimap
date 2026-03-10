@@ -1,5 +1,5 @@
 // API client for the management API
-const API_BASE = '/api/admin';
+const API_BASE = '/admin';
 
 export interface SystemStatus {
   status: string;
@@ -261,7 +261,7 @@ export const serverInfoApi = {
   },
 };
 
-// Model Testing API - calls the API endpoints directly
+// Model Testing API - calls the API endpoints through the GUI server proxy
 export const testModelApi = {
   test: async (params: {
     model: string;
@@ -272,7 +272,6 @@ export const testModelApi = {
     stream?: boolean;
     apiFormat?: 'openai' | 'anthropic';
   }) => {
-    const apiUrl = await serverInfoApi.getApiUrl();
     const isAnthropic = params.apiFormat === 'anthropic';
     const endpoint = isAnthropic ? '/v1/messages' : '/v1/chat/completions';
     
@@ -290,7 +289,9 @@ export const testModelApi = {
       stream: params.stream ?? false,
     };
     
-    return fetch(`${apiUrl}${endpoint}`, {
+    // Use relative URL to go through the GUI server's proxy
+    // This avoids CORS and connection limit issues
+    return fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),

@@ -20,7 +20,7 @@
     ChevronDown,
     ChevronUp
   } from '@lucide/svelte';
-  import { serverInfoApi } from '$lib/utils/api';
+
 
   interface LiveRequest {
     requestId: string;
@@ -46,7 +46,6 @@
   let connecting = $state(false);
   let ws: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  let apiUrl = $state('');
   let autoScroll = $state(true);
   let showOnlyRunning = $state(false);
   let expandedRequest = $state<string | null>(null);
@@ -75,12 +74,11 @@
     connecting = true;
     
     try {
-      if (!apiUrl) {
-        apiUrl = await serverInfoApi.getApiUrl();
-      }
-      
-      const wsUrl = apiUrl.replace('http://', 'ws://').replace('https://', 'wss://');
-      ws = new WebSocket(`${wsUrl}/api/admin/ws`);
+      // Use relative WebSocket URL to connect to same origin as the page
+      // This avoids CORS issues and works through the GUI server proxy
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      ws = new WebSocket(wsUrl);
       
       ws.onopen = () => {
         connected = true;
