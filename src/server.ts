@@ -1268,6 +1268,25 @@ async function handleGetModels(url: URL, headers: Record<string, string>): Promi
   });
 }
 
+// Fetch with timeout helper for models endpoint
+async function fetchWithTimeoutModels(url: string, headers: Record<string, string>, timeoutMs: number): Promise<Response | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    return null;
+  }
+}
+
 // OpenAI-compatible /v1/models endpoint
 async function handleGetModelsOpenAI(corsHeaders: Record<string, string>): Promise<Response> {
   const models: Array<{
@@ -1282,83 +1301,88 @@ async function handleGetModelsOpenAI(corsHeaders: Record<string, string>): Promi
   const routes = state.router.getRoutes();
   const config = state.config.getConfig();
   
-  // First, try to fetch models from all configured providers
-  for (const [providerId, providerConfig] of Object.entries(config.providers)) {
+  // Fetch models from all configured providers in parallel with timeout
+  const providerFetches = Object.entries(config.providers).map(async ([providerId, providerConfig]) => {
     try {
       const provider = providerRegistry.get(providerId);
-      if (!provider) continue;
+      if (!provider) return [];
       
       const modelsUrl = provider.getModelsUrl();
-      if (!modelsUrl) continue;
+      if (!modelsUrl) return [];
       
       const headers = provider.getHeaders();
       
-      const response = await fetch(modelsUrl, {
-        method: 'GET',
-        headers,
-      });
+      // 3 second timeout for provider model fetching
+      const response = await fetchWithTimeoutModels(modelsUrl, headers, 3000);
+      if (!response || !response.ok) return [];
       
-      if (response.ok) {
-        const data = await response.json() as { 
-          data?: Array<{ id: string; created?: number; owned_by?: string }>;
-          models?: Array<{ id?: string; name?: string; model?: string; created?: number; owned_by?: string }>;
-        };
-        
-        // Handle OpenAI-style response format (data array)
-        if (data.data && Array.isArray(data.data)) {
-          for (const model of data.data) {
-            if (model.id && !seen.has(model.id)) {
-              seen.add(model.id);
-              models.push({
-                id: model.id,
-                object: "model",
-                created: model.created || now,
-                owned_by: model.owned_by || providerId,
-              });
-            }
-          }
-        }
-        // Handle Ollama-style response format (models array with 'name' field)
-        else if (data.models && Array.isArray(data.models)) {
-          for (const model of data.models) {
-            const modelId = model.id || model.name || model.model || '';
-            if (modelId && !seen.has(modelId)) {
-              seen.add(modelId);
-              models.push({
-                id: modelId,
-                object: "model",
-                created: model.created || now,
-                owned_by: model.owned_by || providerId,
-              });
-            }
+      const data = await response.json() as { 
+        data?: Array<{ id: string; created?: number; owned_by?: string }>;
+        models?: Array<{ id?: string; name?: string; model?: string; created?: number; owned_by?: string }>;
+      };
+      
+      const providerModels: Array<{ id: string; created: number; owned_by: string }> = [];
+      
+      // Handle OpenAI-style response format (data array)
+      if (data.data && Array.isArray(data.data)) {
+        for (const model of data.data) {
+          if (model.id && !seen.has(model.id)) {
+            seen.add(model.id);
+            providerModels.push({
+              id: model.id,
+              created: model.created || now,
+              owned_by: model.owned_by || providerId,
+            });
           }
         }
       }
+      // Handle Ollama-style response format (models array with 'name' field)
+      else if (data.models && Array.isArray(data.models)) {
+        for (const model of data.models) {
+          const modelId = model.id || model.name || model.model || '';
+          if (modelId && !seen.has(modelId)) {
+            seen.add(modelId);
+            providerModels.push({
+              id: modelId,
+              created: model.created || now,
+              owned_by: model.owned_by || providerId,
+            });
+          }
+        }
+      }
+      
+      return providerModels;
     } catch (error) {
       // Provider doesn't support /models endpoint or is unreachable - that's ok
       console.log(`[models] Could not fetch from ${providerId}: ${error}`);
+      return [];
+    }
+  });
+  
+  // Wait for all provider fetches to complete
+  const providerResults = await Promise.allSettled(providerFetches);
+  for (const result of providerResults) {
+    if (result.status === 'fulfilled' && result.value.length > 0) {
+      for (const model of result.value) {
+        models.push({
+          ...model,
+          object: "model",
+        });
+      }
     }
   }
   
-  // Add models from route patterns (as fallbacks or additional patterns)
+  // Add models from route patterns (strip wildcards for cleaner display)
   for (const route of routes) {
-    // For wildcard patterns, use the base pattern as a representative model
-    if (route.pattern.includes('*')) {
-      const basePattern = route.pattern.replace(/\*/g, '');
-      if (basePattern && !seen.has(route.pattern)) {
-        seen.add(route.pattern);
-        models.push({
-          id: route.pattern,
-          object: "model",
-          created: now,
-          owned_by: route.provider,
-        });
-      }
-    } else if (!seen.has(route.pattern)) {
-      // Exact patterns become models directly
-      seen.add(route.pattern);
+    // Strip wildcards from pattern to get base model name
+    const basePattern = route.pattern.replace(/[\*\?]/g, '');
+    if (!basePattern) continue;
+    
+    // Use the stripped pattern as the model id
+    if (!seen.has(basePattern)) {
+      seen.add(basePattern);
       models.push({
-        id: route.pattern,
+        id: basePattern,
         object: "model",
         created: now,
         owned_by: route.provider,
@@ -1388,132 +1412,94 @@ async function handleGetModelsAnthropic(corsHeaders: Record<string, string>): Pr
   const config = state.config.getConfig();
   const now = new Date().toISOString();
   
-  // Try to fetch models from Anthropic provider if configured
-  const anthropicProvider = providerRegistry.get('anthropic');
-  if (anthropicProvider) {
-    try {
-      const modelsUrl = anthropicProvider.getModelsUrl();
-      if (modelsUrl) {
-        const headers = anthropicProvider.getHeaders();
-        
-        const response = await fetch(modelsUrl, {
-          method: 'GET',
-          headers,
-        });
-        
-        if (response.ok) {
-          const data = await response.json() as {
-            data?: Array<{ 
-              type?: string;
-              id: string; 
-              display_name?: string;
-              created_at?: string;
-            }>;
-          };
-          
-          // Handle Anthropic response format
-          if (data.data && Array.isArray(data.data)) {
-            for (const model of data.data) {
-              if (model.id && !seen.has(model.id)) {
-                seen.add(model.id);
-                models.push({
-                  type: model.type || "model",
-                  id: model.id,
-                  display_name: model.display_name || model.id,
-                  created_at: model.created_at || now,
-                });
-              }
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.log(`[models] Could not fetch from anthropic: ${error}`);
-    }
-  }
-  
-  // Also fetch from other providers and map to Anthropic format
-  for (const [providerId, providerConfig] of Object.entries(config.providers)) {
-    if (providerId === 'anthropic') continue; // Already handled above
-    
+  // Fetch models from all configured providers in parallel with timeout
+  const providerFetches = Object.entries(config.providers).map(async ([providerId, providerConfig]) => {
     try {
       const provider = providerRegistry.get(providerId);
-      if (!provider) continue;
+      if (!provider) return [];
       
       const modelsUrl = provider.getModelsUrl();
-      if (!modelsUrl) continue;
+      if (!modelsUrl) return [];
       
       const headers = provider.getHeaders();
       
-      const response = await fetch(modelsUrl, {
-        method: 'GET',
-        headers,
-      });
+      // 3 second timeout for provider model fetching
+      const response = await fetchWithTimeoutModels(modelsUrl, headers, 3000);
+      if (!response || !response.ok) return [];
       
-      if (response.ok) {
-        const data = await response.json() as { 
-          data?: Array<{ id: string; created?: number }>;
-          models?: Array<{ id?: string; name?: string; model?: string }>;
-        };
-        
-        // Handle OpenAI-style response format
-        if (data.data && Array.isArray(data.data)) {
-          for (const model of data.data) {
-            if (model.id && !seen.has(model.id)) {
-              seen.add(model.id);
-              const createdDate = model.created ? new Date(model.created * 1000).toISOString() : now;
-              models.push({
-                type: "model",
-                id: model.id,
-                display_name: model.id,
-                created_at: createdDate,
-              });
-            }
-          }
-        }
-        // Handle Ollama-style response format
-        else if (data.models && Array.isArray(data.models)) {
-          for (const model of data.models) {
-            const modelId = model.id || model.name || model.model || '';
-            if (modelId && !seen.has(modelId)) {
-              seen.add(modelId);
-              models.push({
-                type: "model",
-                id: modelId,
-                display_name: modelId,
-                created_at: now,
-              });
-            }
+      const data = await response.json() as { 
+        data?: Array<{ 
+          type?: string;
+          id: string; 
+          display_name?: string;
+          created_at?: string;
+        }>;
+        models?: Array<{ id?: string; name?: string; model?: string; created?: number }>;
+      };
+      
+      const providerModels: Array<{ type: string; id: string; display_name: string; created_at: string }> = [];
+      
+      // Handle Anthropic/OpenAI-style response format (data array)
+      if (data.data && Array.isArray(data.data)) {
+        for (const model of data.data) {
+          if (model.id && !seen.has(model.id)) {
+            seen.add(model.id);
+            providerModels.push({
+              type: model.type || "model",
+              id: model.id,
+              display_name: model.display_name || model.id,
+              created_at: model.created_at || now,
+            });
           }
         }
       }
+      // Handle Ollama-style response format
+      else if (data.models && Array.isArray(data.models)) {
+        for (const model of data.models) {
+          const modelId = model.id || model.name || model.model || '';
+          if (modelId && !seen.has(modelId)) {
+            seen.add(modelId);
+            providerModels.push({
+              type: "model",
+              id: modelId,
+              display_name: modelId,
+              created_at: now,
+            });
+          }
+        }
+      }
+      
+      return providerModels;
     } catch (error) {
       console.log(`[models] Could not fetch from ${providerId}: ${error}`);
+      return [];
+    }
+  });
+  
+  // Wait for all provider fetches to complete
+  const providerResults = await Promise.allSettled(providerFetches);
+  for (const result of providerResults) {
+    if (result.status === 'fulfilled' && result.value.length > 0) {
+      models.push(...result.value);
     }
   }
   
-  // Add models from route patterns as fallbacks
+  // Add models from route patterns (strip wildcards for cleaner display)
   for (const route of routes) {
-    let modelId: string;
+    // Strip wildcards from pattern to get base model name
+    const basePattern = route.pattern.replace(/[\*\?]/g, '');
+    if (!basePattern) continue;
     
-    if (route.pattern.includes('*')) {
-      const basePattern = route.pattern.replace(/\*/g, '');
-      if (!basePattern || seen.has(route.pattern)) continue;
-      modelId = route.pattern;
-      seen.add(route.pattern);
-    } else if (!seen.has(route.pattern)) {
-      modelId = route.pattern;
-      seen.add(route.pattern);
-    } else {
-      continue;
+    // Use the stripped pattern as the model id
+    if (!seen.has(basePattern)) {
+      seen.add(basePattern);
+      models.push({
+        type: "model",
+        id: basePattern,
+        display_name: basePattern,
+        created_at: now,
+      });
     }
-    
-    models.push({
-      type: "model",
-      id: modelId,
-      display_name: modelId,
-      created_at: now,
-    });
   }
   
   return new Response(JSON.stringify({
