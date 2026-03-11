@@ -6,6 +6,7 @@ import { existsSync } from "fs";
 import { mkdir, writeFile, readFile, copyFile, readdir, stat, unlink } from "fs/promises";
 import { join, basename, dirname, resolve } from "path";
 import type { RouterConfig, ProviderConfig, RouteConfig, ApiSchemeConfig } from "../types/index.ts";
+import { BUILTIN_PROVIDERS, type ProviderInfo } from "../providers/builtin.ts";
 
 // Use Bun's built-in YAML support
 // @ts-ignore - Bun's YAML import
@@ -290,24 +291,41 @@ export class ConfigManager {
     lines.push("# ═══════════════════════════════════════════════════════════════════════════════");
     lines.push("# Provider Configurations");
     lines.push("# ═══════════════════════════════════════════════════════════════════════════════");
-    lines.push("# Built-in providers with defaults:");
-    lines.push("#   - openai, anthropic, google, groq, together, fireworks");
-    lines.push("#   - ollama, lmstudio, llamacpp, vllm (local - no API key needed)");
+    lines.push("# Only specify values that differ from defaults");
     lines.push("providers:");
     for (const [id, provider] of Object.entries(config.providers || {})) {
       lines.push(`  ${id}:`);
-      lines.push(`    baseUrl: "${provider.baseUrl}"`);
-      if (provider.apiKey) {
-        lines.push(`    # apiKey: "***"  # Set via environment variable for security`);
+      
+      // Only include baseUrl if it differs from builtin default
+      const builtin = this.getBuiltinProviderInfo(id);
+      if (provider.baseUrl !== builtin?.defaultBaseUrl) {
+        lines.push(`    baseUrl: "${provider.baseUrl}"`);
       }
-      if (provider.apiKeyEnv) {
+      
+      // Save apiKey if set (not commented out)
+      if (provider.apiKey) {
+        lines.push(`    apiKey: "${provider.apiKey}"`);
+      }
+      if (provider.apiKeyEnv && provider.apiKeyEnv !== builtin?.defaultApiKeyEnv) {
         lines.push(`    apiKeyEnv: "${provider.apiKeyEnv}"`);
+      }
+      if (provider.authHeader && provider.authHeader !== builtin?.authHeader) {
+        lines.push(`    authHeader: "${provider.authHeader}"`);
+      }
+      if (provider.authPrefix && provider.authPrefix !== builtin?.authPrefix) {
+        lines.push(`    authPrefix: "${provider.authPrefix}"`);
       }
       if (provider.timeout) {
         lines.push(`    timeout: ${provider.timeout}`);
       }
-      if (provider.supportsStreaming !== undefined) {
+      if (provider.supportsStreaming !== undefined && provider.supportsStreaming !== builtin?.supportsStreaming) {
         lines.push(`    supportsStreaming: ${provider.supportsStreaming}`);
+      }
+      if (provider.headers) {
+        lines.push(`    headers:`);
+        for (const [key, value] of Object.entries(provider.headers)) {
+          lines.push(`      "${key}": "${value}"`);
+        }
       }
     }
     lines.push("");
@@ -550,6 +568,13 @@ export class ConfigManager {
    */
   getBackupDir(): string {
     return this.backupDir;
+  }
+
+  /**
+   * Get builtin provider info for a given provider ID
+   */
+  private getBuiltinProviderInfo(id: string): ProviderInfo | undefined {
+    return BUILTIN_PROVIDERS[id];
   }
 }
 

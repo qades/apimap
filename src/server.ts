@@ -993,15 +993,62 @@ async function handleStatusRequest(headers: Record<string, string>): Promise<Res
 }
 
 function handleGetProviders(headers: Record<string, string>): Response {
-  const providers = providerRegistry.getRegisteredProviderInfos();
-  const builtin = Object.entries(BUILTIN_PROVIDERS).map(([id, info]) => ({
-    id,
-    ...info,
-  }));
+  const config = state.config.getConfig();
+  
+  // Build list of all builtin providers with enabled flag
+  // Provider is "enabled" if:
+  // 1. It's in config.providers (explicitly configured), OR
+  // 2. It has an API key set via environment variable (for cloud providers)
+  const allProviders: Array<ProviderInfo & { configured: boolean; enabled: boolean }> = [];
+  
+  for (const [id, builtin] of Object.entries(BUILTIN_PROVIDERS)) {
+    const provider = providerRegistry.get(id);
+    const providerConfig = config.providers[id];
+    
+    // Check if API key is available (either directly or via env)
+    const hasApiKey = provider?.hasApiKey() || 
+      (!!builtin.defaultApiKeyEnv && !!process.env[builtin.defaultApiKeyEnv]);
+    
+    // Provider is enabled if explicitly in config OR has API key
+    const isEnabled = !!providerConfig || hasApiKey;
+    
+    // Provider is fully configured if it has API key or doesn't require one
+    const isConfigured = hasApiKey || !builtin.requiresApiKey;
+    
+    allProviders.push({
+      ...builtin,
+      configured: isConfigured,
+      enabled: isEnabled,
+    });
+  }
+  
+  // Add custom providers from config
+  for (const [id, providerConfig] of Object.entries(config.providers)) {
+    if (BUILTIN_PROVIDERS[id]) continue; // Skip builtins, already added
+    
+    const provider = providerRegistry.get(id);
+    const hasApiKey = !!providerConfig.apiKey || 
+      (!!providerConfig.apiKeyEnv && !!process.env[providerConfig.apiKeyEnv]);
+    
+    allProviders.push({
+      id,
+      name: id,
+      description: "Custom provider",
+      defaultBaseUrl: providerConfig.baseUrl || "",
+      defaultApiKeyEnv: providerConfig.apiKeyEnv,
+      authHeader: providerConfig.authHeader || "Authorization",
+      authPrefix: providerConfig.authPrefix || "Bearer ",
+      supportsStreaming: providerConfig.supportsStreaming ?? true,
+      requiresApiKey: !!providerConfig.apiKeyEnv || !!providerConfig.apiKey,
+      category: "custom" as const,
+      configured: hasApiKey,
+      enabled: true, // Custom providers are always enabled if in config
+    });
+  }
   
   return new Response(JSON.stringify({ 
-    registered: providers,
-    builtin,
+    registered: allProviders,
+    builtin: allProviders, // Same list for convenience
   }), { headers: { "Content-Type": "application/json", ...headers } });
 }
 
@@ -1306,25 +1353,97 @@ async function handleGetModels(url: URL, headers: Record<string, string>): Promi
   // 2. Fetch models from providers (only if not filtering to route-only)
   if (sourceFilter !== 'route') {
     const config = state.config.getConfig();
-    for (const [providerId, providerConfig] of Object.entries(config.providers)) {
+    
+    // Build list of enabled providers (same logic as handleGetProviders)
+    const enabledProviders: string[] = [];
+    for (const [id, builtin] of Object.entries(BUILTIN_PROVIDERS)) {
+      const provider = providerRegistry.get(id);
+      const providerConfig = config.providers[id];
+      const hasApiKey = provider?.hasApiKey() || 
+        (!!builtin.defaultApiKeyEnv && !!process.env[builtin.defaultApiKeyEnv]);
+      if (!!providerConfig || hasApiKey) {
+        enabledProviders.push(id);
+      }
+    }
+    // Add custom providers
+    for (const id of Object.keys(config.providers)) {
+      if (!BUILTIN_PROVIDERS[id] && !enabledProviders.includes(id)) {
+        enabledProviders.push(id);
+      }
+    }
+    
+    console.log(`[models] Enabled providers: ${enabledProviders.join(', ')}`);
+    console.log(`[models] Provider filter: ${providerFilter || 'none'}`);
+    
+    for (const providerId of enabledProviders) {
       // Skip if filtering by provider and doesn't match
-      if (providerFilter && providerId !== providerFilter) continue;
+      if (providerFilter && providerId !== providerFilter) {
+        console.log(`[models] Skipping ${providerId} - doesn't match filter ${providerFilter}`);
+        continue;
+      }
+      
+      const savedConfig = config.providers[providerId];
       
       try {
         const provider = providerRegistry.get(providerId);
-        if (!provider) continue;
+        if (!provider) {
+          console.log(`[models] Provider ${providerId} not found in registry`);
+          continue;
+        }
         
         // Use the provider's getModelsUrl method to get the correct URL
         const modelsUrl = provider.getModelsUrl();
-        if (!modelsUrl) continue;
+        if (!modelsUrl) {
+          console.log(`[models] Provider ${providerId} has no models URL`);
+          continue;
+        }
         
-        // Use the provider's getHeaders() method to get correct auth headers
-        const headers = provider.getHeaders();
+        // Only send auth headers if provider has an API key configured
+        // Some local servers (LM Studio, Ollama, etc.) reject requests with empty Authorization headers
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
         
-        const response = await fetch(modelsUrl, {
-          method: 'GET',
-          headers,
-        });
+        // Add auth headers only if API key is configured
+        // Check saved config first, then fall back to provider's method
+        const apiKey = savedConfig?.apiKey || 
+          (savedConfig?.apiKeyEnv ? process.env[savedConfig.apiKeyEnv] : undefined) ||
+          provider.getApiKey();
+        const authHeader = savedConfig?.authHeader || BUILTIN_PROVIDERS[providerId]?.authHeader;
+        const authPrefix = savedConfig?.authPrefix || BUILTIN_PROVIDERS[providerId]?.authPrefix || '';
+        
+        if (apiKey && authHeader) {
+          headers[authHeader] = `${authPrefix}${apiKey}`;
+        }
+        
+        // Add any custom headers from config
+        if (savedConfig?.headers) {
+          Object.assign(headers, savedConfig.headers);
+        }
+        
+        console.log(`[models] Fetching from ${providerId}: ${modelsUrl}`);
+        
+        // Add a 5-second timeout to prevent hanging on unreachable providers
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
+        let response: Response;
+        try {
+          response = await fetch(modelsUrl, {
+            method: 'GET',
+            headers,
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
+        
+        console.log(`[models] ${providerId} response: ${response.status} ${response.statusText}`);
+        
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => 'no body');
+          console.log(`[models] ${providerId} error response: ${errorText.slice(0, 200)}`);
+        }
         
         if (response.ok) {
           const data = await response.json() as { 
@@ -1418,7 +1537,23 @@ async function handleGetModelsOpenAI(corsHeaders: Record<string, string>): Promi
       const modelsUrl = provider.getModelsUrl();
       if (!modelsUrl) return [];
       
-      const headers = provider.getHeaders();
+      // Only send auth headers if provider has an API key configured
+      // Some local servers (LM Studio, Ollama, etc.) reject requests with empty Authorization headers
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Add auth headers only if API key is configured
+      const apiKey = providerConfig?.apiKey || 
+        (providerConfig?.apiKeyEnv ? process.env[providerConfig.apiKeyEnv] : undefined);
+      if (apiKey && providerConfig?.authHeader) {
+        headers[providerConfig.authHeader] = `${providerConfig.authPrefix || ''}${apiKey}`;
+      }
+      
+      // Add any custom headers from config
+      if (providerConfig?.headers) {
+        Object.assign(headers, providerConfig.headers);
+      }
       
       // 3 second timeout for provider model fetching
       const response = await fetchWithTimeoutModels(modelsUrl, headers, 3000);
@@ -1529,7 +1664,23 @@ async function handleGetModelsAnthropic(corsHeaders: Record<string, string>): Pr
       const modelsUrl = provider.getModelsUrl();
       if (!modelsUrl) return [];
       
-      const headers = provider.getHeaders();
+      // Only send auth headers if provider has an API key configured
+      // Some local servers (LM Studio, Ollama, etc.) reject requests with empty Authorization headers
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Add auth headers only if API key is configured
+      const apiKey = providerConfig?.apiKey || 
+        (providerConfig?.apiKeyEnv ? process.env[providerConfig.apiKeyEnv] : undefined);
+      if (apiKey && providerConfig?.authHeader) {
+        headers[providerConfig.authHeader] = `${providerConfig.authPrefix || ''}${apiKey}`;
+      }
+      
+      // Add any custom headers from config
+      if (providerConfig?.headers) {
+        Object.assign(headers, providerConfig.headers);
+      }
       
       // 3 second timeout for provider model fetching
       const response = await fetchWithTimeoutModels(modelsUrl, headers, 3000);

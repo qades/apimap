@@ -31,6 +31,7 @@ export interface ProviderInfo {
   requiresApiKey: boolean;
   category: 'cloud' | 'local' | 'custom';
   configured?: boolean;
+  enabled?: boolean;
 }
 
 export interface ProviderConfig {

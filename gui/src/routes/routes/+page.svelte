@@ -16,6 +16,7 @@
   import { routes, providers, isLoadingRoutes, unroutedRequests } from '$lib/stores';
   import { routesApi, providersApi, modelsApi } from '$lib/utils/api';
   import type { RouteConfig, ModelInfo } from '$lib/utils/api';
+  import type { ProviderInfo } from '$lib/utils/api';
 
   let editingRoutes: RouteConfig[] = $state([]);
   let hasChanges = $state(false);
@@ -59,7 +60,8 @@
       
       // Sort routes by priority (highest first) when loading
       editingRoutes = [...routesData.routes].sort((a, b) => (b.priority || 0) - (a.priority || 0));
-      providers.set(providersData.registered);
+      // Only show enabled providers in dropdown
+      providers.set(providersData.registered.filter((p: ProviderInfo & { enabled?: boolean }) => p.enabled));
       
       // Preload models for each unique provider in routes
       const uniqueProviders = new Set(editingRoutes.map(r => r.provider).filter(Boolean));

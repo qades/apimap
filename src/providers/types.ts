@@ -41,6 +41,7 @@ export interface ProviderInfo {
   supportsStreaming: boolean;
   requiresApiKey: boolean;
   category: ProviderCategory;
+  enabled?: boolean;
 }
 
 /**
