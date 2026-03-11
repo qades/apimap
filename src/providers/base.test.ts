@@ -1,5 +1,10 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { OpenAICompatibleProvider, AnthropicProvider, GoogleProvider, OllamaProvider } from "./base.ts";
+import {
+  OpenAICompatibleProvider,
+  AnthropicProvider,
+  GoogleProvider,
+  OllamaProvider,
+} from "./implementations/index.ts";
 import type { ProviderConfig } from "../types/index.ts";
 
 describe("BaseProvider", () => {

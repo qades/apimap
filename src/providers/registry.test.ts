@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { ProviderRegistry, BUILTIN_PROVIDERS } from "./registry.ts";
+import { ProviderRegistry } from "./registry.ts";
+import { BUILTIN_PROVIDERS } from "./builtin.ts";
 import type { ProviderConfig } from "../types/index.ts";
 
 describe("ProviderRegistry", () => {

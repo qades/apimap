@@ -2,20 +2,12 @@
 // Base Provider Class
 // ============================================================================
 
-import type { ProviderConfig, OpenAIRequest, OpenAIResponse, AnthropicRequest, AnthropicResponse } from "../types/index.ts";
+import type { ProviderConfig } from "../types/index.ts";
+import type { ProviderRequest, ProviderInfo } from "./types.ts";
 
-export interface ProviderRequest {
-  url: string;
-  headers: Record<string, string>;
-  body: unknown;
-}
-
-export interface ProviderResponse {
-  status: number;
-  headers: Record<string, string>;
-  body: ReadableStream<Uint8Array> | string | null;
-}
-
+/**
+ * Abstract base class for all providers
+ */
 export abstract class BaseProvider {
   protected config: ProviderConfig;
   public readonly id: string;
@@ -89,48 +81,20 @@ export abstract class BaseProvider {
 
   /**
    * Get endpoint URL for a specific format variant
-   * Maps format identifiers to provider-specific endpoint paths
+   * Override in subclasses for provider-specific mappings
    */
   getEndpointUrl(format: string): string {
     const baseUrl = this.config.baseUrl;
     
-    // Provider-specific endpoint mappings
-    switch (this.id) {
-      case "anthropic":
-        // Anthropic only has messages API
-        return `${baseUrl}/v1/messages`;
-      
-      case "google":
-        return `${baseUrl}/models`;
-      
-      case "ollama":
-        switch (format) {
-          case "ollama-generate":
-            return `${baseUrl}/api/generate`;
-          case "ollama-chat":
-          default:
-            return `${baseUrl}/api/chat`;
-        }
-      
-      case "openai":
-      case "groq":
-      case "together":
-      case "fireworks":
-      case "mistral":
-      case "cohere":
-      case "openrouter":
-      case "deepseek":
+    // Default: OpenAI-compatible providers
+    switch (format) {
+      case "openai-responses":
+        return `${baseUrl}/responses`;
+      case "openai-completions":
+        return `${baseUrl}/completions`;
+      case "openai-chat":
       default:
-        // OpenAI-compatible providers
-        switch (format) {
-          case "openai-responses":
-            return `${baseUrl}/responses`;
-          case "openai-completions":
-            return `${baseUrl}/completions`;
-          case "openai-chat":
-          default:
-            return `${baseUrl}/chat/completions`;
-        }
+        return `${baseUrl}/chat/completions`;
     }
   }
 
@@ -139,43 +103,14 @@ export abstract class BaseProvider {
    * Returns null if the provider doesn't have a models endpoint
    */
   getModelsUrl(): string | null {
-    const baseUrl = this.config.baseUrl;
-    
-    switch (this.id) {
-      case "anthropic":
-        // Anthropic has models at /v1/models
-        return `${baseUrl}/v1/models`;
-      
-      case "google":
-        // Google uses a different models endpoint format
-        return `${baseUrl}/models`;
-      
-      case "ollama":
-        // Ollama has a local models endpoint
-        return `${baseUrl}/api/tags`;
-      
-      case "openai":
-      case "groq":
-      case "together":
-      case "fireworks":
-      case "mistral":
-      case "cohere":
-      case "openrouter":
-      case "deepseek":
-      case "lmstudio":
-      case "llamacpp":
-      case "vllm":
-      default:
-        // OpenAI-compatible providers use /v1/models
-        return `${baseUrl}/models`;
-    }
+    return `${this.config.baseUrl}/models`;
   }
 
   /**
    * Build a request for this provider
    * @param body - The request body
    * @param originalHeaders - Original request headers
-   * @param format - Optional format variant (e.g., "openai-chat", "openai-responses")
+   * @param format - Optional format variant
    */
   abstract buildRequest(body: unknown, originalHeaders: Headers, format?: string): ProviderRequest;
 
@@ -216,97 +151,5 @@ export abstract class BaseProvider {
       supportsStreaming: this.supportsStreaming(),
       timeout: this.config.timeout || 120,
     };
-  }
-}
-
-/**
- * OpenAI-compatible provider (works with most providers)
- */
-export class OpenAICompatibleProvider extends BaseProvider {
-  buildRequest(body: unknown, originalHeaders: Headers, format?: string): ProviderRequest {
-    return {
-      url: this.getEndpointUrl(format || "openai-chat"),
-      headers: this.getHeaders(),
-      body,
-    };
-  }
-}
-
-/**
- * Anthropic provider (requires special handling)
- */
-export class AnthropicProvider extends BaseProvider {
-  /**
-   * Override getHeaders to include anthropic-version
-   */
-  getHeaders(): Record<string, string> {
-    const apiKey = this.getApiKey();
-    
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "anthropic-version": "2023-06-01",
-    };
-
-    if (apiKey && this.config.authHeader) {
-      headers[this.config.authHeader] = `${this.config.authPrefix || ""}${apiKey}`;
-    }
-
-    // Merge with custom headers from config
-    Object.assign(headers, this.config.headers);
-
-    return headers;
-  }
-
-  buildRequest(body: unknown, originalHeaders: Headers, format?: string): ProviderRequest {
-    return {
-      url: this.getEndpointUrl(format || "anthropic-messages"),
-      headers: this.getHeaders(),
-      body,
-    };
-  }
-}
-
-/**
- * Google Gemini provider
- */
-export class GoogleProvider extends BaseProvider {
-  buildRequest(body: unknown, originalHeaders: Headers, format?: string): ProviderRequest {
-    const apiKey = this.getApiKey();
-    
-    // Google uses URL query parameter for API key
-    let url = this.getEndpointUrl(format || "google");
-    if (apiKey) {
-      url += `?key=${apiKey}`;
-    }
-
-    return {
-      url,
-      headers: {
-        "Content-Type": "application/json",
-        ...this.config.headers,
-      },
-      body,
-    };
-  }
-}
-
-/**
- * Ollama provider (local, no auth required)
- */
-export class OllamaProvider extends BaseProvider {
-  buildRequest(body: unknown, originalHeaders: Headers, format?: string): ProviderRequest {
-    return {
-      url: this.getEndpointUrl(format || "ollama-chat"),
-      headers: {
-        "Content-Type": "application/json",
-        ...this.config.headers,
-      },
-      body,
-    };
-  }
-
-  hasApiKey(): boolean {
-    // Ollama doesn't require an API key
-    return true;
   }
 }

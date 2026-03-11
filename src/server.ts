@@ -20,7 +20,8 @@ import type {
 import type { InternalRequest, InternalResponse, InternalStreamChunk } from "./types/internal.ts";
 
 import { ConfigManager } from "./config/manager.ts";
-import { providerRegistry, BUILTIN_PROVIDERS } from "./providers/registry.ts";
+import { providerRegistry } from "./providers/registry.ts";
+import { BUILTIN_PROVIDERS } from "./providers/builtin.ts";
 import { LoggingManager } from "./logging/index.ts";
 import { Router } from "./router/index.ts";
 import * as transformers from "./transformers/index.ts";
