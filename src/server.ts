@@ -684,6 +684,9 @@ async function createStreamingResponse(
   let finalStopReason: string | null = null;
   let streamAborted = false;
   let fullContent = "";
+  // Track Anthropic content block state for proper block lifecycle
+  let currentContentBlockIndex = 0;
+  let currentContentBlockType: "text" | "tool_use" | null = isAnthropicSource ? "text" : null;
 
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
@@ -741,6 +744,28 @@ async function createStreamingResponse(
             if (chunk.delta?.text) {
               fullContent += chunk.delta.text;
             }
+
+            // For Anthropic source: handle content block transitions (text → tool_use)
+            if (isAnthropicSource && chunk.delta.type === "tool_call" && currentContentBlockType !== "tool_use") {
+              // Close the current text block before starting tool_use
+              if (currentContentBlockType === "text") {
+                await writer.write(encoder.encode(
+                  transformers.createAnthropicStreamEvent("content_block_stop", { index: currentContentBlockIndex })
+                ));
+              }
+              currentContentBlockIndex++;
+              currentContentBlockType = "tool_use";
+              // Emit content_block_start for the tool_use with correct index
+              chunk.index = currentContentBlockIndex;
+            } else if (isAnthropicSource) {
+              // Keep the index consistent
+              if (chunk.delta.type === "tool_call") {
+                chunk.index = currentContentBlockIndex;
+              } else {
+                chunk.index = currentContentBlockIndex;
+              }
+            }
+
             const outputLine = transformers.toProviderStreamChunk(sourceFormat, chunk, model);
             await writer.write(encoder.encode(outputLine));
             // Update monitoring
@@ -755,9 +780,20 @@ async function createStreamingResponse(
 
       // Send stream end
       if (isAnthropicSource) {
+        // Close the current content block
+        await writer.write(encoder.encode(
+          transformers.createAnthropicStreamEvent("content_block_stop", { index: currentContentBlockIndex })
+        ));
+        // Send message_delta with stop reason and message_stop
         const mappedReason = transformers.mapStopReason("openai", "anthropic", finalStopReason);
         await writer.write(encoder.encode(
-          transformers.createStreamStop("anthropic", mappedReason, outputTokens)
+          transformers.createAnthropicStreamEvent("message_delta", {
+            delta: { stop_reason: mappedReason },
+            usage: { output_tokens: outputTokens },
+          })
+        ));
+        await writer.write(encoder.encode(
+          transformers.createAnthropicStreamEvent("message_stop", {})
         ));
       } else {
         await writer.write(encoder.encode("data: [DONE]\n\n"));
@@ -781,17 +817,19 @@ async function createStreamingResponse(
       if (error instanceof Error) {
         errorMessage = error.message;
       } else if (error === undefined || error === null) {
-        errorMessage = "Unknown stream error";
+        // writer.write() throws undefined/null when client disconnects in Bun
+        errorMessage = "Client disconnected (stream write failed)";
       } else {
         errorMessage = String(error);
       }
-      
+
       // Check if this is a client disconnect (not a real error)
-      const isClientDisconnect = errorMessage.includes("cancelled") || 
+      const isClientDisconnect = errorMessage.includes("cancelled") ||
                                   errorMessage.includes("aborted") ||
                                   errorMessage.includes("The operation was aborted") ||
                                   errorMessage.includes("Broken pipe") ||
-                                  errorMessage.includes("Connection reset");
+                                  errorMessage.includes("Connection reset") ||
+                                  errorMessage.includes("Client disconnected");
       
       if (isClientDisconnect) {
         console.log(`[stream] client disconnected after ${chunkIndex} chunks`);

@@ -9,6 +9,9 @@ import * as anthropicTransformer from "./anthropic.ts";
 
 export type { InternalRequest, InternalResponse, InternalStreamChunk, ProviderFormat };
 
+// Re-export Anthropic stream helpers needed by server for content block lifecycle
+export const createAnthropicStreamEvent = anthropicTransformer.createAnthropicStreamEvent;
+
 /**
  * Parse a request from a provider format to internal format
  */
