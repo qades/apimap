@@ -26,8 +26,6 @@ describe("ConfigManager", () => {
       if (existsSync(testConfigPath)) {
         await unlink(testConfigPath);
       }
-      const files = await Bun.file(testBackupDir).stream();
-      // Note: full cleanup would iterate and delete backups
       if (existsSync(testDir)) {
         await rmdir(testDir, { recursive: true });
       }
@@ -56,7 +54,6 @@ providers:
 routes:
   - pattern: "gpt-4*"
     provider: openai
-    priority: 100
 `;
       await writeFile(testConfigPath, yamlContent);
 
@@ -109,7 +106,7 @@ routes: []
         providers: {
           openai: { baseUrl: "https://api.openai.com/v1" },
         },
-        routes: [{ pattern: "gpt-4*", provider: "openai", priority: 100 }],
+        routes: [{ pattern: "gpt-4*", provider: "openai" }],
       };
 
       // Need to load first to initialize
@@ -181,7 +178,7 @@ routes: []
   });
 
   describe("updateRoutes", () => {
-    test("should update routes and sort by priority", async () => {
+    test("should update routes preserving order", async () => {
       const yamlContent = `
 providers: {}
 routes: []
@@ -190,13 +187,15 @@ routes: []
       await manager.load();
 
       await manager.updateRoutes([
-        { pattern: "b*", provider: "b", priority: 10 },
-        { pattern: "a*", provider: "a", priority: 100 },
+        { pattern: "gpt-4*", provider: "openai" },
+        { pattern: "claude-*", provider: "anthropic" },
+        { pattern: "*", provider: "fallback" },
       ]);
 
       const config = manager.getConfig();
-      expect(config.routes[0].pattern).toBe("a*");
-      expect(config.routes[1].pattern).toBe("b*");
+      expect(config.routes[0].pattern).toBe("gpt-4*");
+      expect(config.routes[1].pattern).toBe("claude-*");
+      expect(config.routes[2].pattern).toBe("*");
     });
   });
 
@@ -209,11 +208,29 @@ routes: []
       await writeFile(testConfigPath, yamlContent);
       await manager.load();
 
-      await manager.addRoute({ pattern: "gpt-4*", provider: "openai", priority: 100 });
+      await manager.addRoute({ pattern: "gpt-4*", provider: "openai" });
 
       const config = manager.getConfig();
       expect(config.routes.length).toBe(1);
       expect(config.routes[0].pattern).toBe("gpt-4*");
+    });
+
+    test("should insert before catch-all", async () => {
+      const yamlContent = `
+providers: {}
+routes:
+  - pattern: "*"
+    provider: fallback
+`;
+      await writeFile(testConfigPath, yamlContent);
+      await manager.load();
+
+      await manager.addRoute({ pattern: "gpt-4*", provider: "openai" });
+
+      const config = manager.getConfig();
+      expect(config.routes.length).toBe(2);
+      expect(config.routes[0].pattern).toBe("gpt-4*");
+      expect(config.routes[1].pattern).toBe("*");
     });
   });
 
@@ -224,7 +241,6 @@ providers: {}
 routes:
   - pattern: "gpt-4*"
     provider: openai
-    priority: 100
 `;
       await writeFile(testConfigPath, yamlContent);
       await manager.load();
@@ -233,22 +249,6 @@ routes:
 
       const config = manager.getConfig();
       expect(config.routes.length).toBe(0);
-    });
-  });
-
-  describe("updateDefaultProvider", () => {
-    test("should update default provider", async () => {
-      const yamlContent = `
-providers: {}
-routes: []
-`;
-      await writeFile(testConfigPath, yamlContent);
-      await manager.load();
-
-      await manager.updateDefaultProvider("openai");
-
-      const config = manager.getConfig();
-      expect(config.defaultProvider).toBe("openai");
     });
   });
 
@@ -266,9 +266,9 @@ routes: []
         changeCount++;
       });
 
-      await manager.updateDefaultProvider("openai");
+      await manager.updateProviders({ test: { baseUrl: "http://test" } });
 
-      expect(changeCount).toBe(1);
+      expect(changeCount).toBeGreaterThan(0);
 
       // Cleanup
       unsubscribe();
@@ -289,7 +289,7 @@ routes: []
 
       unsubscribe();
 
-      await manager.updateDefaultProvider("openai");
+      await manager.updateProviders({ test: { baseUrl: "http://test" } });
 
       expect(changeCount).toBe(0);
     });

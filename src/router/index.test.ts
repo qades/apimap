@@ -8,7 +8,6 @@ describe("Router", () => {
   beforeEach(() => {
     router = new Router({
       routes: [],
-      defaultProvider: undefined,
     });
   });
 
@@ -81,7 +80,7 @@ describe("Router", () => {
   describe("findRoute", () => {
     test("should return null when no routes match", () => {
       router.setRoutes([
-        { pattern: "gpt-4*", provider: "openai", priority: 100 },
+        { pattern: "gpt-4*", provider: "openai" },
       ]);
       const result = router.findRoute("claude-3");
       expect(result).toBeNull();
@@ -89,7 +88,7 @@ describe("Router", () => {
 
     test("should find matching route", () => {
       router.setRoutes([
-        { pattern: "gpt-4*", provider: "openai", priority: 100 },
+        { pattern: "gpt-4*", provider: "openai" },
       ]);
       const result = router.findRoute("gpt-4-turbo");
       expect(result).not.toBeNull();
@@ -97,29 +96,31 @@ describe("Router", () => {
       expect(result?.model).toBe("gpt-4-turbo");
     });
 
-    test("should use default provider when no route matches", () => {
-      router.setRoutes([]);
-      router.setDefaultProvider("openai");
+    test("should use catch-all * as fallback", () => {
+      router.setRoutes([
+        { pattern: "gpt-4*", provider: "openai" },
+        { pattern: "*", provider: "ollama" },
+      ]);
       const result = router.findRoute("unknown-model");
       expect(result).not.toBeNull();
-      expect(result?.provider).toBe("openai");
+      expect(result?.provider).toBe("ollama");
       expect(result?.model).toBe("unknown-model");
     });
 
-    test("should respect priority order", () => {
+    test("should match top-down (first match wins)", () => {
       router.setRoutes([
-        { pattern: "*", provider: "fallback", priority: 10 },
-        { pattern: "gpt-4*", provider: "openai", priority: 100 },
-        { pattern: "gpt-4-turbo*", provider: "openai-turbo", priority: 200 },
+        { pattern: "gpt-4-turbo*", provider: "openai-turbo" },
+        { pattern: "gpt-4*", provider: "openai" },
+        { pattern: "*", provider: "fallback" },
       ]);
-      
+
       const result = router.findRoute("gpt-4-turbo-preview");
       expect(result?.provider).toBe("openai-turbo");
     });
 
     test("should apply model template", () => {
       router.setRoutes([
-        { pattern: "local/*", provider: "ollama", model: "${1}", priority: 100 },
+        { pattern: "local/*", provider: "ollama", model: "${1}" },
       ]);
       const result = router.findRoute("local/llama2");
       expect(result?.provider).toBe("ollama");
@@ -130,7 +131,7 @@ describe("Router", () => {
   describe("canRoute", () => {
     test("should return true when route exists", () => {
       router.setRoutes([
-        { pattern: "gpt-4*", provider: "openai", priority: 100 },
+        { pattern: "gpt-4*", provider: "openai" },
       ]);
       expect(router.canRoute("gpt-4")).toBe(true);
     });
@@ -140,40 +141,46 @@ describe("Router", () => {
       expect(router.canRoute("gpt-4")).toBe(false);
     });
 
-    test("should return true when default provider is set", () => {
-      router.setRoutes([]);
-      router.setDefaultProvider("openai");
-      expect(router.canRoute("gpt-4")).toBe(true);
+    test("should return true when catch-all exists", () => {
+      router.setRoutes([
+        { pattern: "*", provider: "ollama" },
+      ]);
+      expect(router.canRoute("anything")).toBe(true);
     });
   });
 
   describe("addRoute", () => {
     test("should add new route", () => {
-      router.addRoute({ pattern: "gpt-4*", provider: "openai", priority: 100 });
+      router.addRoute({ pattern: "gpt-4*", provider: "openai" });
       expect(router.getRoutes().length).toBe(1);
       expect(router.getRoutes()[0].pattern).toBe("gpt-4*");
     });
 
     test("should replace existing route with same pattern", () => {
-      router.addRoute({ pattern: "gpt-4*", provider: "openai", priority: 100 });
-      router.addRoute({ pattern: "gpt-4*", provider: "anthropic", priority: 200 });
+      router.addRoute({ pattern: "gpt-4*", provider: "openai" });
+      router.addRoute({ pattern: "gpt-4*", provider: "anthropic" });
       expect(router.getRoutes().length).toBe(1);
       expect(router.getRoutes()[0].provider).toBe("anthropic");
     });
 
-    test("should maintain priority order", () => {
-      router.addRoute({ pattern: "b*", provider: "b", priority: 10 });
-      router.addRoute({ pattern: "a*", provider: "a", priority: 100 });
+    test("should insert before catch-all", () => {
+      router.setRoutes([
+        { pattern: "gpt-4*", provider: "openai" },
+        { pattern: "*", provider: "fallback" },
+      ]);
+      router.addRoute({ pattern: "claude-*", provider: "anthropic" });
       const routes = router.getRoutes();
-      expect(routes[0].pattern).toBe("a*");
-      expect(routes[1].pattern).toBe("b*");
+      expect(routes.length).toBe(3);
+      expect(routes[0].pattern).toBe("gpt-4*");
+      expect(routes[1].pattern).toBe("claude-*");
+      expect(routes[2].pattern).toBe("*");
     });
   });
 
   describe("removeRoute", () => {
     test("should remove route by pattern", () => {
       router.setRoutes([
-        { pattern: "gpt-4*", provider: "openai", priority: 100 },
+        { pattern: "gpt-4*", provider: "openai" },
       ]);
       const removed = router.removeRoute("gpt-4*");
       expect(removed).toBe(true);
@@ -182,7 +189,7 @@ describe("Router", () => {
 
     test("should return false when pattern not found", () => {
       router.setRoutes([
-        { pattern: "gpt-4*", provider: "openai", priority: 100 },
+        { pattern: "gpt-4*", provider: "openai" },
       ]);
       const removed = router.removeRoute("claude-3*");
       expect(removed).toBe(false);
@@ -193,12 +200,11 @@ describe("Router", () => {
   describe("getStats", () => {
     test("should return correct stats", () => {
       router.setRoutes([
-        { pattern: "gpt-4*", provider: "openai", priority: 100 },
-        { pattern: "claude-3*", provider: "anthropic", priority: 100 },
-        { pattern: "llama2*", provider: "ollama", priority: 50 },
+        { pattern: "gpt-4*", provider: "openai" },
+        { pattern: "claude-3*", provider: "anthropic" },
+        { pattern: "llama2*", provider: "ollama" },
       ]);
-      router.setDefaultProvider("openai");
-      
+
       const stats = router.getStats();
       expect(stats.totalRoutes).toBe(3);
       expect(stats.patterns).toContain("gpt-4*");
@@ -206,31 +212,6 @@ describe("Router", () => {
       expect(stats.providers).toContain("openai");
       expect(stats.providers).toContain("anthropic");
       expect(stats.providers).toContain("ollama");
-    });
-  });
-
-  describe("suggestRoute", () => {
-    test("should suggest openai for gpt- models", () => {
-      const suggestion = router.suggestRoute("gpt-4");
-      expect(suggestion?.provider).toBe("openai");
-      expect(suggestion?.priority).toBe(70);
-    });
-
-    test("should suggest anthropic for claude- models", () => {
-      const suggestion = router.suggestRoute("claude-3-opus");
-      expect(suggestion?.provider).toBe("anthropic");
-      expect(suggestion?.priority).toBe(100);
-    });
-
-    test("should suggest ollama for llama models", () => {
-      const suggestion = router.suggestRoute("llama2:13b");
-      expect(suggestion?.provider).toBe("ollama");
-      expect(suggestion?.priority).toBe(80);
-    });
-
-    test("should return null for unknown model", () => {
-      const suggestion = router.suggestRoute("unknown-model");
-      expect(suggestion).toBeNull();
     });
   });
 
@@ -242,14 +223,13 @@ describe("Router", () => {
         "gpt-3.5",
         "claude-3",
       ]);
-      
+
       expect(results[0].matched).toBe(true);
-      // gpt-4 matches gpt-4*, capture group is empty string
       expect(results[0].captures).toEqual([""]);
-      
+
       expect(results[1].matched).toBe(true);
       expect(results[1].captures).toEqual(["-turbo"]);
-      
+
       expect(results[2].matched).toBe(false);
       expect(results[3].matched).toBe(false);
     });

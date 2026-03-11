@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "bun run src/server.ts",
-    "dev": "bun --hot run src/server.ts",
+    "dev": "bun --hot src/server.ts --log-level debug",
     "dev:gui": "cd gui && bun run dev --host",
     "build:gui": "cd gui && bun run build",
     "start:all": "./start.sh",

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # API Map - Start Script
-# Starts both the API server and GUI
+# Starts the API server (which auto-launches the GUI in dev mode)
 
 cd "$(dirname "$0")"
 
@@ -14,7 +14,7 @@ echo ""
 cleanup() {
     echo ""
     echo "Shutting down..."
-    kill $API_PID $GUI_PID 2>/dev/null
+    kill $API_PID 2>/dev/null
     exit 0
 }
 
@@ -40,85 +40,27 @@ fi
 
 # Create config directory if needed
 if [ ! -d "config" ]; then
-    echo "📁 Creating config directory..."
     mkdir -p config/backups
 fi
 
-# Create default config if needed
-if [ ! -f "config/config.yaml" ]; then
-    echo "📝 Creating default configuration..."
-    cat > config/config.yaml << 'EOF'
-server:
-  port: 3000
-  host: "0.0.0.0"
-  timeout: 120
-  cors:
-    origin: "*"
-    credentials: false
+# Config will be auto-generated on first run with detected providers
+# if config/config.yaml doesn't exist
 
-logging:
-  dir: "./logs"
-  level: "info"
-  maskKeys: true
-
-preload:
-  enabled: false
-  models: []
-
-schemes:
-  - id: "openai"
-    path: "/v1/chat/completions"
-    format: "openai"
-  - id: "anthropic"
-    path: "/v1/messages"
-    format: "anthropic"
-
-providers:
-  ollama:
-    baseUrl: "http://localhost:11434"
-    timeout: 300
-
-routes:
-  - pattern: "local/*"
-    provider: ollama
-    model: "${1}"
-    priority: 80
-
-  - pattern: "llama2*"
-    provider: ollama
-    priority: 70
-
-  - pattern: "mistral*"
-    provider: ollama
-    priority: 70
-
-  - pattern: "codellama*"
-    provider: ollama
-    priority: 70
-EOF
-fi
-
-# Start API server
-echo "🚀 Starting API server on http://0.0.0.0:3000..."
-bun run --hot src/server.ts --host 0.0.0.0 &
+# Start API server with hot reload (auto-launches GUI dev server)
+echo "🚀 Starting API server (hot reload) on http://0.0.0.0:3000..."
+echo "🎨 GUI will be available at http://0.0.0.0:3001"
+echo ""
+bun --hot src/server.ts &
 API_PID=$!
-
-# Wait for API to start
-sleep 2
-
-# Start GUI with host binding
-echo "🎨 Starting GUI on http://0.0.0.0:3001..."
-cd gui && bun run dev --host &
-GUI_PID=$!
 
 echo ""
 echo "╔════════════════════════════════════════════════════════════╗"
 echo "║  API Server:  http://0.0.0.0:3000                        ║"
 echo "║  GUI:         http://0.0.0.0:3001                        ║"
 echo "║                                                            ║"
-echo "║  Press Ctrl+C to stop both servers                         ║"
+echo "║  Press Ctrl+C to stop                                      ║"
 echo "╚════════════════════════════════════════════════════════════╝"
 echo ""
 
-# Wait for both processes
+# Wait for process
 wait

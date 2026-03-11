@@ -1,44 +1,25 @@
 // ============================================================================
-// Router - Request routing and pattern matching
+// Router - Request routing and pattern matching (top-down ordering)
 // ============================================================================
 
 import type { RouteConfig, RouteMatch, MatchResult } from "../types/index.ts";
 
 export interface RouterOptions {
   routes: RouteConfig[];
-  defaultProvider?: string;
 }
 
 export class Router {
   private routes: RouteConfig[];
-  private defaultProvider?: string;
 
   constructor(options: RouterOptions) {
     this.routes = [...options.routes];
-    this.defaultProvider = options.defaultProvider;
-    this.sortRoutes();
   }
 
   /**
-   * Sort routes by priority (highest first)
-   */
-  private sortRoutes(): void {
-    this.routes.sort((a, b) => (b.priority || 0) - (a.priority || 0));
-  }
-
-  /**
-   * Update routes
+   * Update routes (order is preserved as-is, matched top-down)
    */
   setRoutes(routes: RouteConfig[]): void {
     this.routes = [...routes];
-    this.sortRoutes();
-  }
-
-  /**
-   * Update default provider
-   */
-  setDefaultProvider(provider: string | undefined): void {
-    this.defaultProvider = provider;
   }
 
   /**
@@ -50,11 +31,11 @@ export class Router {
     // Escape special regex characters except * and ?
     let regexPattern = pattern
       .replace(/[.+^${}()|[\]\\]/g, "\\$&");
-    
+
     // Replace wildcards with capture groups
     const captures: string[] = [];
     let captureIndex = 1;
-    
+
     regexPattern = regexPattern
       .replace(/\*/g, () => {
         captures.push(`$${captureIndex++}`);
@@ -67,11 +48,11 @@ export class Router {
 
     const regex = new RegExp(`^${regexPattern}$`, "i");
     const match = model.match(regex);
-    
+
     if (!match) {
       return { matched: false, captures: [] };
     }
-    
+
     return {
       matched: true,
       captures: match.slice(1),
@@ -84,7 +65,7 @@ export class Router {
    */
   applyTemplate(template: string | undefined, originalModel: string, captures: string[]): string {
     if (!template) return originalModel;
-    
+
     return template.replace(/\$\{(\d+)\}/g, (match, num) => {
       const index = parseInt(num, 10) - 1;
       return captures[index] ?? match;
@@ -92,12 +73,12 @@ export class Router {
   }
 
   /**
-   * Find a route for a model
+   * Find a route for a model (top-down, first match wins)
    */
   findRoute(model: string): RouteMatch | null {
     for (const route of this.routes) {
       const matchResult = this.matchPattern(model, route.pattern);
-      
+
       if (matchResult.matched) {
         return {
           provider: route.provider,
@@ -105,14 +86,6 @@ export class Router {
           pattern: route.pattern,
         };
       }
-    }
-
-    // Fall back to default provider
-    if (this.defaultProvider) {
-      return {
-        provider: this.defaultProvider,
-        model,
-      };
     }
 
     return null;
@@ -126,13 +99,19 @@ export class Router {
   }
 
   /**
-   * Add a new route
+   * Add a new route at the end (before catch-all if present)
    */
   addRoute(route: RouteConfig): void {
     // Remove existing route with same pattern
     this.routes = this.routes.filter(r => r.pattern !== route.pattern);
-    this.routes.push(route);
-    this.sortRoutes();
+
+    // Insert before catch-all "*" if one exists at the end
+    const lastRoute = this.routes[this.routes.length - 1];
+    if (lastRoute && lastRoute.pattern === "*") {
+      this.routes.splice(this.routes.length - 1, 0, route);
+    } else {
+      this.routes.push(route);
+    }
   }
 
   /**
@@ -160,13 +139,9 @@ export class Router {
     providers: string[];
   } {
     const providers = new Set<string>();
-    
+
     for (const route of this.routes) {
       providers.add(route.provider);
-    }
-    
-    if (this.defaultProvider) {
-      providers.add(this.defaultProvider);
     }
 
     return {
@@ -174,30 +149,6 @@ export class Router {
       patterns: this.routes.map(r => r.pattern),
       providers: Array.from(providers),
     };
-  }
-
-  /**
-   * Suggest a route for a model name
-   */
-  suggestRoute(model: string): Partial<RouteConfig> | null {
-    // Common patterns
-    if (model.startsWith("gpt-")) {
-      return { provider: "openai", priority: 70 };
-    }
-    if (model.startsWith("claude-")) {
-      return { provider: "anthropic", priority: 100 };
-    }
-    if (model.includes("llama")) {
-      return { provider: "ollama", priority: 80 };
-    }
-    if (model.includes("mistral") || model.includes("mixtral")) {
-      return { provider: "ollama", priority: 80 };
-    }
-    if (model.startsWith("gemini-")) {
-      return { provider: "google", priority: 70 };
-    }
-
-    return null;
   }
 
   /**

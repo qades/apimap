@@ -130,8 +130,8 @@ describe('API Client', () => {
         ok: true,
         json: () => Promise.resolve({
           routes: [
-            { pattern: 'gpt-4*', provider: 'openai', priority: 100 },
-            { pattern: 'claude-3*', provider: 'anthropic', priority: 90 }
+            { pattern: 'gpt-4*', provider: 'openai' },
+            { pattern: 'claude-3*', provider: 'anthropic' }
           ]
         })
       });

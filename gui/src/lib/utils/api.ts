@@ -1,8 +1,14 @@
 // API client for the management API
-// API URL is injected by the GUI server into the HTML
-const API_URL = typeof window !== 'undefined' && (window as any).API_URL 
-  ? (window as any).API_URL 
-  : 'http://localhost:3000';
+// API URL is injected by the GUI server (production) or via env (dev)
+function resolveApiUrl(): string {
+  if (typeof window !== 'undefined') {
+    const injected = (window as any).API_URL;
+    // Skip the unresolved template placeholder
+    if (injected && injected !== '{{API_URL}}') return injected;
+  }
+  return 'http://localhost:3000';
+}
+const API_URL = resolveApiUrl();
 const API_BASE = `${API_URL}/admin`;
 
 export interface SystemStatus {
@@ -49,7 +55,6 @@ export interface RouteConfig {
   pattern: string;
   provider: string;
   model?: string;
-  priority?: number;
 }
 
 export interface ApiSchemeConfig {
@@ -80,7 +85,7 @@ export interface RouterConfig {
   schemes?: ApiSchemeConfig[];
   providers: Record<string, ProviderConfig>;
   routes: RouteConfig[];
-  defaultProvider?: string;
+  // Routes are matched top-down, first match wins
 }
 
 export interface UnroutedRequest {
@@ -190,12 +195,7 @@ export const configApi = {
       method: 'POST',
       body: JSON.stringify(config),
     }),
-  getDefaultProvider: () => fetchApi<{ defaultProvider?: string }>('/default-provider'),
-  updateDefaultProvider: (defaultProvider?: string) =>
-    fetchApi<{ success: boolean }>('/default-provider', {
-      method: 'PUT',
-      body: JSON.stringify({ defaultProvider }),
-    }),
+  // Routes are matched top-down with catch-all "*" at the end
 };
 
 // Backup API

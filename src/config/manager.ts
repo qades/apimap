@@ -6,11 +6,8 @@ import { existsSync } from "fs";
 import { mkdir, writeFile, readFile, copyFile, readdir, stat, unlink } from "fs/promises";
 import { join, basename, dirname, resolve } from "path";
 import type { RouterConfig, ProviderConfig, RouteConfig, ApiSchemeConfig } from "../types/index.ts";
-import { BUILTIN_PROVIDERS, type ProviderInfo } from "../providers/builtin.ts";
-
-// Use Bun's built-in YAML support
-// @ts-ignore - Bun's YAML import
-const YAML = await import("bun").then(b => b.file);
+import { BUILTIN_PROVIDERS, TIER4_LOCAL_PROVIDERS, type ProviderInfo } from "../providers/builtin.ts";
+import { log } from "../logger.ts";
 
 export interface ConfigBackup {
   filename: string;
@@ -63,7 +60,7 @@ export class ConfigManager {
       try {
         listener(event);
       } catch (err) {
-        console.error("Config change listener error:", err);
+        log.error(`Config change listener error: ${err}`);
       }
     }
   }
@@ -85,18 +82,14 @@ export class ConfigManager {
       throw new Error(`Config file not found: ${this.configPath}`);
     }
 
-    // Use Bun's built-in YAML parsing
     const file = Bun.file(this.configPath);
     const content = await file.text();
-    
-    // Parse YAML using Bun's native support or fallback
+
     let parsed: Partial<RouterConfig>;
     try {
-      // Try to use YAML parser
       const yamlModule = await import("yaml");
       parsed = yamlModule.parse(content) as Partial<RouterConfig>;
     } catch {
-      // Fallback to JSON
       try {
         parsed = JSON.parse(content) as Partial<RouterConfig>;
       } catch {
@@ -106,7 +99,7 @@ export class ConfigManager {
 
     // Merge with defaults
     this.config = this.mergeWithDefaults(parsed);
-    
+
     // Track modification time
     const stats = await stat(this.configPath);
     this.lastModified = stats.mtime;
@@ -141,7 +134,6 @@ export class ConfigManager {
       ],
       providers: parsed.providers || {},
       routes: parsed.routes || [],
-      defaultProvider: parsed.defaultProvider,
     };
 
     return config;
@@ -162,7 +154,7 @@ export class ConfigManager {
    */
   async hasExternalChanges(): Promise<boolean> {
     if (!this.lastModified) return false;
-    
+
     try {
       const stats = await stat(this.configPath);
       return stats.mtime > this.lastModified;
@@ -198,7 +190,7 @@ export class ConfigManager {
 
     // Serialize to YAML with comments
     const yaml = this.serializeToYaml(configToSave);
-    
+
     // Ensure directory exists
     const dir = dirname(this.configPath);
     if (!existsSync(dir)) {
@@ -207,10 +199,10 @@ export class ConfigManager {
 
     // Write file
     await writeFile(this.configPath, yaml, "utf-8");
-    
+
     // Update in-memory config
     this.config = configToSave;
-    
+
     // Update modification time
     const stats = await stat(this.configPath);
     this.lastModified = stats.mtime;
@@ -222,20 +214,8 @@ export class ConfigManager {
    * Serialize config to YAML with helpful comments
    */
   private serializeToYaml(config: RouterConfig): string {
-    const yaml = {
-      server: config.server,
-      logging: config.logging,
-      preload: config.preload,
-      schemes: config.schemes,
-      providers: config.providers,
-      routes: config.routes,
-      defaultProvider: config.defaultProvider,
-    };
-
-    // Use YAML library for proper serialization
-    // Include comments using a template approach
     const lines: string[] = [];
-    
+
     lines.push("# ═══════════════════════════════════════════════════════════════════════════════");
     lines.push("# Universal Model Router - Configuration");
     lines.push("# ═══════════════════════════════════════════════════════════════════════════════");
@@ -295,14 +275,14 @@ export class ConfigManager {
     lines.push("providers:");
     for (const [id, provider] of Object.entries(config.providers || {})) {
       lines.push(`  ${id}:`);
-      
+
       // Only include baseUrl if it differs from builtin default
       const builtin = this.getBuiltinProviderInfo(id);
       if (provider.baseUrl !== builtin?.defaultBaseUrl) {
         lines.push(`    baseUrl: "${provider.baseUrl}"`);
       }
-      
-      // Save apiKey if set (not commented out)
+
+      // Save apiKey if set
       if (provider.apiKey) {
         lines.push(`    apiKey: "${provider.apiKey}"`);
       }
@@ -332,10 +312,11 @@ export class ConfigManager {
 
     // Routes section
     lines.push("# ═══════════════════════════════════════════════════════════════════════════════");
-    lines.push("# Routing Rules - Pattern matching for models");
+    lines.push("# Routing Rules - matched top-down, first match wins");
     lines.push("# ═══════════════════════════════════════════════════════════════════════════════");
     lines.push("# Patterns support: * (any chars), ? (single char)");
     lines.push("# Use ${1}, ${2}, etc. to capture wildcard values in model name");
+    lines.push("# Put catch-all \"*\" pattern last as a default fallback");
     lines.push("routes:");
     for (const route of config.routes || []) {
       lines.push(`  - pattern: "${route.pattern}"`);
@@ -343,20 +324,6 @@ export class ConfigManager {
       if (route.model) {
         lines.push(`    model: "${route.model}"`);
       }
-      if (route.priority !== undefined) {
-        lines.push(`    priority: ${route.priority}`);
-      }
-    }
-    lines.push("");
-
-    // Default provider
-    lines.push("# ═══════════════════════════════════════════════════════════════════════════════");
-    lines.push("# Default Provider - Used when no route matches");
-    lines.push("# ═══════════════════════════════════════════════════════════════════════════════");
-    if (config.defaultProvider) {
-      lines.push(`defaultProvider: "${config.defaultProvider}"`);
-    } else {
-      lines.push('# defaultProvider: "openai"');
     }
 
     return lines.join("\n");
@@ -419,7 +386,7 @@ export class ConfigManager {
    */
   async restoreBackup(filename: string): Promise<void> {
     const backupPath = join(this.backupDir, filename);
-    
+
     if (!existsSync(backupPath)) {
       throw new Error(`Backup not found: ${filename}`);
     }
@@ -431,7 +398,7 @@ export class ConfigManager {
 
     await copyFile(backupPath, this.configPath);
     await this.load();
-    
+
     this.notifyChange("full");
   }
 
@@ -440,7 +407,7 @@ export class ConfigManager {
    */
   async deleteBackup(filename: string): Promise<void> {
     const backupPath = join(this.backupDir, filename);
-    
+
     if (existsSync(backupPath)) {
       await unlink(backupPath);
     }
@@ -460,16 +427,13 @@ export class ConfigManager {
   }
 
   /**
-   * Update routes
+   * Update routes (order is preserved as-is)
    */
   async updateRoutes(routes: RouteConfig[]): Promise<void> {
     if (!this.config) {
       throw new Error("Config not loaded");
     }
 
-    // Sort by priority
-    routes.sort((a, b) => (b.priority || 0) - (a.priority || 0));
-    
     this.config.routes = routes;
     await this.save(this.config, true);
     this.notifyChange("routes");
@@ -515,29 +479,21 @@ export class ConfigManager {
   }
 
   /**
-   * Update default provider
-   */
-  async updateDefaultProvider(defaultProvider: string | undefined): Promise<void> {
-    if (!this.config) {
-      throw new Error("Config not loaded");
-    }
-
-    this.config.defaultProvider = defaultProvider;
-    await this.save(this.config, true);
-    // Note: save() already calls notifyChange("full")
-  }
-
-  /**
-   * Add a new route
+   * Add a new route (before catch-all if present)
    */
   async addRoute(route: RouteConfig): Promise<void> {
     if (!this.config) {
       throw new Error("Config not loaded");
     }
 
-    this.config.routes.push(route);
-    this.config.routes.sort((a, b) => (b.priority || 0) - (a.priority || 0));
-    
+    // Insert before catch-all "*" if one exists at the end
+    const lastRoute = this.config.routes[this.config.routes.length - 1];
+    if (lastRoute && lastRoute.pattern === "*") {
+      this.config.routes.splice(this.config.routes.length - 1, 0, route);
+    } else {
+      this.config.routes.push(route);
+    }
+
     await this.save(this.config, true);
     this.notifyChange("routes");
   }
@@ -551,7 +507,7 @@ export class ConfigManager {
     }
 
     this.config.routes = this.config.routes.filter(r => r.pattern !== pattern);
-    
+
     await this.save(this.config, true);
     this.notifyChange("routes");
   }
@@ -575,6 +531,108 @@ export class ConfigManager {
    */
   private getBuiltinProviderInfo(id: string): ProviderInfo | undefined {
     return BUILTIN_PROVIDERS[id];
+  }
+
+  /**
+   * Auto-detect reachable local providers and create initial config
+   */
+  static async createInitialConfig(configPath: string): Promise<RouterConfig> {
+    log.info("First-time setup: detecting reachable local providers...");
+
+    const providers: Record<string, ProviderConfig> = {};
+    const routes: RouteConfig[] = [];
+    let firstReachableLocal: string | null = null;
+
+    // Check each local provider
+    for (const [id, info] of Object.entries(TIER4_LOCAL_PROVIDERS)) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const response = await fetch(info.defaultBaseUrl, {
+          signal: controller.signal,
+        }).catch(() => null);
+        clearTimeout(timeoutId);
+
+        if (response && (response.ok || response.status < 500)) {
+          log.info(`  Found ${info.name} at ${info.defaultBaseUrl}`);
+          providers[id] = {
+            baseUrl: info.defaultBaseUrl,
+          };
+          if (!firstReachableLocal) {
+            firstReachableLocal = id;
+          }
+        }
+      } catch {
+        // Not reachable, skip
+      }
+    }
+
+    // Also check cloud providers with API keys in env
+    for (const [id, info] of Object.entries(BUILTIN_PROVIDERS)) {
+      if (info.category === "local") continue; // Already handled
+      if (info.defaultApiKeyEnv && process.env[info.defaultApiKeyEnv]) {
+        log.info(`  Found ${info.name} API key in environment (${info.defaultApiKeyEnv})`);
+        providers[id] = {
+          baseUrl: info.defaultBaseUrl,
+        };
+      }
+    }
+
+    // Build default routes for detected providers
+    // Cloud providers with API keys get specific routes
+    if (providers["openai"]) {
+      routes.push({ pattern: "gpt-*", provider: "openai" });
+      routes.push({ pattern: "o1*", provider: "openai" });
+      routes.push({ pattern: "o3*", provider: "openai" });
+    }
+    if (providers["anthropic"]) {
+      routes.push({ pattern: "claude-*", provider: "anthropic" });
+    }
+    if (providers["google"]) {
+      routes.push({ pattern: "gemini-*", provider: "google" });
+    }
+    if (providers["groq"]) {
+      routes.push({ pattern: "groq/*", provider: "groq", model: "${1}" });
+    }
+    if (providers["deepseek"]) {
+      routes.push({ pattern: "deepseek-*", provider: "deepseek" });
+    }
+
+    // Add catch-all to first reachable local provider (or first cloud)
+    const catchAllProvider = firstReachableLocal || Object.keys(providers)[0];
+    if (catchAllProvider) {
+      routes.push({ pattern: "*", provider: catchAllProvider });
+    }
+
+    const providerCount = Object.keys(providers).length;
+    if (providerCount === 0) {
+      log.warn("No reachable providers found. You'll need to configure providers manually.");
+    } else {
+      log.info(`Detected ${providerCount} provider(s). Config created with ${routes.length} route(s).`);
+    }
+
+    return {
+      server: {
+        port: 3000,
+        host: "0.0.0.0",
+        cors: { origin: "*", credentials: false },
+        timeout: 120,
+      },
+      logging: {
+        dir: "./logs",
+        level: "info",
+        maskKeys: true,
+      },
+      preload: {
+        enabled: false,
+      },
+      schemes: [
+        { id: "openai", format: "openai-chat" },
+        { id: "anthropic", format: "anthropic-messages" },
+      ],
+      providers,
+      routes,
+    };
   }
 }
 

@@ -25,6 +25,7 @@ import { BUILTIN_PROVIDERS } from "./providers/builtin.ts";
 import { LoggingManager } from "./logging/index.ts";
 import { Router } from "./router/index.ts";
 import * as transformers from "./transformers/index.ts";
+import { log, setLogLevel } from "./logger.ts";
 
 // ============================================================================
 // Server State
@@ -169,6 +170,7 @@ ${line("  --log-dir <path>       Override log directory from config")}
 ${line("  --timeout <seconds>    Override timeout from config")}
 ${line("  --gui-port <number>    Port for management GUI (default: 3001)")}
 ${line("  --hostname <name>      Hostname for URLs (default: actual hostname)")}
+${line("  --log-level <level>    Log level: debug, info, warn, error")}
 ${line("  --no-gui               Disable management GUI")}
 ${line("  --help                 Show this help message")}
 ${line("")}
@@ -409,7 +411,7 @@ async function handleRequest(
   const providerReq = provider.buildRequest(transformedReq, req.headers);
   const timeoutMs = provider.getTimeoutMs(config.server?.timeout);
 
-  console.log(`[${new Date().toISOString()}] ${requestId} ${scheme.format}:${model} → ${route.provider}:${route.model} (stream=${body.stream ?? false})`);
+  log.info(`${requestId} ${scheme.format}:${model} → ${route.provider}:${route.model} (stream=${body.stream ?? false})`);
 
   // Log entry
   const logEntry: LogEntry = {
@@ -539,7 +541,7 @@ async function handleAnthropicPassthrough(
   const providerReq = provider.buildRequest(body, req.headers);
   const timeoutMs = provider.getTimeoutMs(config.server?.timeout);
 
-  console.log(`[${new Date().toISOString()}] ${requestId} anthropic → [ANTHROPIC PASSTHROUGH] (stream=${body.stream ?? false})`);
+  log.info(`${requestId} anthropic → [ANTHROPIC PASSTHROUGH] (stream=${body.stream ?? false})`);
 
   const logEntry: LogEntry = {
     timestamp: new Date().toISOString(),
@@ -715,9 +717,9 @@ async function createStreamingResponse(
           // Reader was cancelled (usually client disconnected)
           const msg = readError instanceof Error ? readError.message : String(readError);
           if (msg.includes("cancelled") || msg.includes("aborted") || msg.includes("released")) {
-            console.log(`[stream] reader cancelled after ${chunkIndex} chunks`);
+            log.debug(`[stream] reader cancelled after ${chunkIndex} chunks`);
           } else {
-            console.error(`[stream] read error: ${msg}`);
+            log.error(`[stream] read error: ${msg}`);
           }
           break;
         }
@@ -833,11 +835,11 @@ async function createStreamingResponse(
                                   errorMessage.includes("Client disconnected");
       
       if (isClientDisconnect) {
-        console.log(`[stream] client disconnected after ${chunkIndex} chunks`);
+        log.debug(`[stream] client disconnected after ${chunkIndex} chunks`);
       } else {
-        console.error(`[stream] error: ${errorMessage}`);
+        log.error(`[stream] error: ${errorMessage}`);
         if (error instanceof Error && error.stack) {
-          console.error(`[stream] stack: ${error.stack}`);
+          log.error(`[stream] stack: ${error.stack}`);
         }
       }
       
@@ -948,12 +950,6 @@ function handleManagementAPI(req: Request, url: URL): Promise<Response> | Respon
   // Logs endpoint
   if (path === "/logs" && req.method === "GET") {
     return handleGetLogs(url, corsHeaders);
-  }
-
-  // Default provider endpoint
-  if (path === "/default-provider") {
-    if (req.method === "GET") return handleGetDefaultProvider(corsHeaders);
-    if (req.method === "PUT") return handleUpdateDefaultProvider(req, corsHeaders);
   }
 
   // Server info endpoint (for GUI to know API URL)
@@ -1148,7 +1144,6 @@ async function handleSaveConfig(req: Request, headers: Record<string, string>): 
     // Reload everything
     const config = state.config.getConfig();
     state.router.setRoutes(config.routes);
-    state.router.setDefaultProvider(config.defaultProvider);
     providerRegistry.initializeFromConfig(config.providers);
     state.logging.setLogDir(config.logging?.dir || null);
     state.logging.setMaskKeys(config.logging?.maskKeys !== false);
@@ -1199,17 +1194,16 @@ async function handleRestoreBackup(filename: string, headers: Record<string, str
     // Reload everything
     const config = state.config.getConfig();
     state.router.setRoutes(config.routes);
-    state.router.setDefaultProvider(config.defaultProvider);
     providerRegistry.initializeFromConfig(config.providers);
     state.logging.setLogDir(config.logging?.dir || null);
-    
-    return new Response(JSON.stringify({ success: true }), { 
-      headers: { "Content-Type": "application/json", ...headers } 
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { "Content-Type": "application/json", ...headers }
     });
   } catch (error) {
-    return new Response(JSON.stringify({ error: String(error) }), { 
-      status: 500, 
-      headers: { "Content-Type": "application/json", ...headers } 
+    return new Response(JSON.stringify({ error: String(error) }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", ...headers }
     });
   }
 }
@@ -1253,30 +1247,6 @@ async function handleGetLogs(url: URL, headers: Record<string, string>): Promise
   } catch (error) {
     return new Response(JSON.stringify({ error: String(error) }), { 
       status: 500, 
-      headers: { "Content-Type": "application/json", ...headers } 
-    });
-  }
-}
-
-function handleGetDefaultProvider(headers: Record<string, string>): Response {
-  const config = state.config.getConfig();
-  return new Response(JSON.stringify({ defaultProvider: config.defaultProvider }), { 
-    headers: { "Content-Type": "application/json", ...headers } 
-  });
-}
-
-async function handleUpdateDefaultProvider(req: Request, headers: Record<string, string>): Promise<Response> {
-  try {
-    const body = await req.json() as { defaultProvider?: string };
-    await state.config.updateDefaultProvider(body.defaultProvider);
-    state.router.setDefaultProvider(body.defaultProvider);
-    
-    return new Response(JSON.stringify({ success: true }), { 
-      headers: { "Content-Type": "application/json", ...headers } 
-    });
-  } catch (error) {
-    return new Response(JSON.stringify({ error: String(error) }), { 
-      status: 400, 
       headers: { "Content-Type": "application/json", ...headers } 
     });
   }
@@ -1372,13 +1342,13 @@ async function handleGetModels(url: URL, headers: Record<string, string>): Promi
       }
     }
     
-    console.log(`[models] Enabled providers: ${enabledProviders.join(', ')}`);
-    console.log(`[models] Provider filter: ${providerFilter || 'none'}`);
+    log.debug(`[models] Enabled providers: ${enabledProviders.join(', ')}`);
+    log.debug(`[models] Provider filter: ${providerFilter || 'none'}`);
     
     for (const providerId of enabledProviders) {
       // Skip if filtering by provider and doesn't match
       if (providerFilter && providerId !== providerFilter) {
-        console.log(`[models] Skipping ${providerId} - doesn't match filter ${providerFilter}`);
+        log.debug(`[models] Skipping ${providerId} - doesn't match filter ${providerFilter}`);
         continue;
       }
       
@@ -1387,14 +1357,14 @@ async function handleGetModels(url: URL, headers: Record<string, string>): Promi
       try {
         const provider = providerRegistry.get(providerId);
         if (!provider) {
-          console.log(`[models] Provider ${providerId} not found in registry`);
+          log.debug(`[models] Provider ${providerId} not found in registry`);
           continue;
         }
         
         // Use the provider's getModelsUrl method to get the correct URL
         const modelsUrl = provider.getModelsUrl();
         if (!modelsUrl) {
-          console.log(`[models] Provider ${providerId} has no models URL`);
+          log.debug(`[models] Provider ${providerId} has no models URL`);
           continue;
         }
         
@@ -1421,7 +1391,7 @@ async function handleGetModels(url: URL, headers: Record<string, string>): Promi
           Object.assign(headers, savedConfig.headers);
         }
         
-        console.log(`[models] Fetching from ${providerId}: ${modelsUrl}`);
+        log.debug(`[models] Fetching from ${providerId}: ${modelsUrl}`);
         
         // Add a 5-second timeout to prevent hanging on unreachable providers
         const controller = new AbortController();
@@ -1438,11 +1408,11 @@ async function handleGetModels(url: URL, headers: Record<string, string>): Promi
           clearTimeout(timeoutId);
         }
         
-        console.log(`[models] ${providerId} response: ${response.status} ${response.statusText}`);
+        log.debug(`[models] ${providerId} response: ${response.status} ${response.statusText}`);
         
         if (!response.ok) {
           const errorText = await response.text().catch(() => 'no body');
-          console.log(`[models] ${providerId} error response: ${errorText.slice(0, 200)}`);
+          log.debug(`[models] ${providerId} error response: ${errorText.slice(0, 200)}`);
         }
         
         if (response.ok) {
@@ -1485,7 +1455,7 @@ async function handleGetModels(url: URL, headers: Record<string, string>): Promi
         }
       } catch (error) {
         // Provider doesn't support /models endpoint or is unreachable - that's ok
-        console.log(`[models] Could not fetch from ${providerId}: ${error}`);
+        log.debug(`[models] Could not fetch from ${providerId}: ${error}`);
       }
     }
   }
@@ -1597,7 +1567,7 @@ async function handleGetModelsOpenAI(corsHeaders: Record<string, string>): Promi
       return providerModels;
     } catch (error) {
       // Provider doesn't support /models endpoint or is unreachable - that's ok
-      console.log(`[models] Could not fetch from ${providerId}: ${error}`);
+      log.debug(`[models] Could not fetch from ${providerId}: ${error}`);
       return [];
     }
   });
@@ -1730,7 +1700,7 @@ async function handleGetModelsAnthropic(corsHeaders: Record<string, string>): Pr
       
       return providerModels;
     } catch (error) {
-      console.log(`[models] Could not fetch from ${providerId}: ${error}`);
+      log.debug(`[models] Could not fetch from ${providerId}: ${error}`);
       return [];
     }
   });
@@ -1784,45 +1754,39 @@ async function main() {
 
   const configPath = args.config || "config/config.yaml";
   const guiPort = args["no-gui"] ? 0 : (args["gui-port"] ? parseInt(args["gui-port"], 10) : 3001);
+  const isDev = process.argv.includes("--hot") || !!process.env.BUN_HOT;
+
+  // Set log level from CLI arg early
+  if (args["log-level"]) {
+    setLogLevel(args["log-level"]);
+  }
 
   // Initialize state
   const configManager = new ConfigManager(configPath);
-  
+
   try {
     await configManager.load();
   } catch (error) {
-    console.error(`Failed to load config: ${error}`);
-    console.error("\nCreating default config...");
-    
-    // Create default config
-    const defaultConfig: RouterConfig = {
-      server: {
-        port: parseInt(args.port || "3000", 10),
-        host: "0.0.0.0",
-        cors: { origin: "*", credentials: false },
-        timeout: parseInt(args.timeout || "120", 10),
-      },
-      logging: {
-        dir: args["log-dir"] || "./logs",
-        level: "info",
-        maskKeys: true,
-      },
-      preload: {
-        enabled: false,
-      },
-      schemes: [
-        { id: "openai", format: "openai-chat" },
-        { id: "anthropic", format: "anthropic-messages" },
-      ],
-      providers: {},
-      routes: [],
-    };
+    log.warn(`Config not found: ${configManager.getConfigPath()}`);
+
+    // First-time: auto-detect reachable providers
+    const defaultConfig = await ConfigManager.createInitialConfig(configPath);
+
+    // Apply CLI overrides
+    if (args.port) defaultConfig.server!.port = parseInt(args.port, 10);
+    if (args.timeout) defaultConfig.server!.timeout = parseInt(args.timeout, 10);
+    if (args["log-dir"]) defaultConfig.logging!.dir = args["log-dir"];
 
     await configManager.save(defaultConfig, false);
-    console.log(`Default config created at: ${configManager.getConfigPath()}`);
+    log.info(`Config created at: ${configManager.getConfigPath()}`);
   }
 
   const config = configManager.getConfig();
+
+  // Set log level from config (CLI takes precedence, already set above)
+  if (!args["log-level"] && config.logging?.level) {
+    setLogLevel(config.logging.level);
+  }
 
   // Initialize logging
   const loggingManager = new LoggingManager(
@@ -1831,10 +1795,9 @@ async function main() {
   );
   await loggingManager.initialize();
 
-  // Initialize router
+  // Initialize router (top-down matching, no priority sorting)
   const router = new Router({
     routes: config.routes,
-    defaultProvider: config.defaultProvider,
   });
 
   // Initialize providers
@@ -1851,7 +1814,7 @@ async function main() {
 
   // Listen for log events to print filename to stdout
   loggingManager.on("logged", ({ filename }: { filename: string }) => {
-    console.log(`  → Log: ${filename}`);
+    log.debug(`Log written: ${filename}`);
   });
   
   // Listen for log events to broadcast to WebSocket clients
@@ -1915,15 +1878,16 @@ async function main() {
   
   const providerLines = activeProviders.length > 0
     ? activeProviders.map(([id, p]) => {
-        const left = `  - ${id.padEnd(13)} → ${p.baseUrl.slice(0, 45)}`;
+        const baseUrl = p.baseUrl || "(default)";
+        const left = `  - ${id.padEnd(13)} → ${baseUrl.slice(0, 45)}`;
         return boxLine(left);
       })
     : [boxLine("  (none)")];
   
   const routeLines = config.routes.length > 0
-    ? config.routes.map(r => {
+    ? config.routes.map((r, i) => {
         const modelInfo = r.model || "(as-is)";
-        const left = `  ${r.pattern} → ${r.provider}:${modelInfo} (pri:${r.priority || 0})`;
+        const left = `  ${i + 1}. ${r.pattern} → ${r.provider}:${modelInfo}`;
         return boxLine(left.slice(0, INNER_WIDTH));
       })
     : [boxLine("  (none)")];
@@ -1939,18 +1903,17 @@ ${boxSeparator()}
 ${boxLine("  Active Providers:")}
 ${providerLines.join("\n")}
 ${boxSeparator()}
-${boxLine("  Routes (pattern → provider → target model):")}
+${boxLine("  Routes (top-down, first match wins):")}
 ${routeLines.join("\n")}
-${config.defaultProvider ? boxLine("  Default: ", config.defaultProvider) : boxLine("  Default: (none)")}
 ${boxBottom()}
 `);
 
   // Print supported endpoints
-  console.log("Supported endpoints:");
+  log.info("Supported endpoints:");
   config.schemes?.forEach(s => {
-    console.log(`  POST http://${displayHost}:${apiPort}${getSchemePath(s)} (${s.format})`);
+    log.info(`  POST http://${displayHost}:${apiPort}${getSchemePath(s)} (${s.format})`);
   });
-  console.log(`\nHealth check: http://${displayHost}:${apiPort}/health`);
+  log.info(`Health check: http://${displayHost}:${apiPort}/health`);
 
   // Start API server
   server = Bun.serve({
@@ -2029,7 +1992,7 @@ ${boxBottom()}
           const recentLogs = await state.logging.getRecentLogs(50);
           ws.send(JSON.stringify({ type: 'initial_logs', logs: recentLogs }));
         } catch (err) {
-          console.error("Failed to send initial logs:", err);
+          log.error(`Failed to send initial logs: ${err}`);
         }
       },
       async close(ws) {
@@ -2049,87 +2012,95 @@ ${boxBottom()}
     },
   });
 
-  console.log(`API server running at http://${displayHost}:${apiPort}/`);
-  console.log(`Management API at http://${displayHost}:${apiPort}/admin/`);
+  log.info(`API server running at http://${displayHost}:${apiPort}/`);
+  log.info(`Management API at http://${displayHost}:${apiPort}/admin/`);
 
   // Start GUI server if enabled
+  let guiProcess: import("bun").Subprocess | null = null;
+
   if (guiPort > 0) {
-    const guiDir = join(dirname(import.meta.dir), "gui", "build");
-    if (existsSync(guiDir)) {
-      const guiServer = Bun.serve({
-        port: guiPort,
-        hostname: host,
-        idleTimeout: 30,
-
-        async fetch(req) {
-          const url = new URL(req.url);
-
-          // Serve static files from gui/build
-          let filePath = join(guiDir, url.pathname);
-          let file = Bun.file(filePath);
-
-          // Try as-is first, then with index.html
-          if (!(await file.exists())) {
-            filePath = join(guiDir, url.pathname, "index.html");
-            file = Bun.file(filePath);
+    if (isDev) {
+      // Dev mode: launch SvelteKit dev server for hot reload
+      const guiDir = join(dirname(import.meta.dir), "gui");
+      if (existsSync(join(guiDir, "package.json"))) {
+        log.info(`Starting GUI dev server (hot reload) on port ${guiPort}...`);
+        guiProcess = Bun.spawn(
+          ["bun", "run", "dev", "--port", String(guiPort), "--host"],
+          {
+            cwd: guiDir,
+            stdio: ["ignore", "inherit", "inherit"],
+            env: {
+              ...process.env,
+              PUBLIC_API_URL: `http://${displayHost}:${apiPort}`,
+            },
           }
-
-          // SPA fallback to index.html
-          const isSPAFallback = !(await file.exists());
-          if (isSPAFallback) {
-            filePath = join(guiDir, "index.html");
-            file = Bun.file(filePath);
-          }
-
-          // Inject API URL into HTML (using pre-calculated displayHost and apiPort)
-          if (filePath.endsWith("index.html")) {
-            const html = await file.text();
-            const apiUrl = `http://${displayHost}:${apiPort}`;
-            const modifiedHtml = html.replace('{{API_URL}}', apiUrl);
-            return new Response(modifiedHtml, {
-              headers: { "Content-Type": "text/html" },
-            });
-          }
-
-          return new Response(file);
-        },
-      });
-
-      console.log(`\nGUI server running at http://${displayHost}:${guiPort}/`);
-
-      // Graceful shutdown (with GUI)
-      const shutdown = () => {
-        console.log("\nShutting down...");
-        guiServer.stop();
-        server.stop();
-        process.exit(0);
-      };
-      process.on("SIGINT", shutdown);
-      process.on("SIGTERM", shutdown);
+        );
+        log.info(`GUI dev server at http://${displayHost}:${guiPort}/`);
+      } else {
+        log.warn(`GUI source not found at ${guiDir}`);
+      }
     } else {
-      console.log(`\nGUI build not found at ${guiDir}. Run 'cd gui && bun run build' to build the GUI.`);
-      // Graceful shutdown (no GUI)
-      const shutdown = () => {
-        console.log("\nShutting down...");
-        server.stop();
-        process.exit(0);
-      };
-      process.on("SIGINT", shutdown);
-      process.on("SIGTERM", shutdown);
+      // Production: serve built GUI files
+      const guiDir = join(dirname(import.meta.dir), "gui", "build");
+      if (existsSync(guiDir)) {
+        const guiServer = Bun.serve({
+          port: guiPort,
+          hostname: host,
+          idleTimeout: 30,
+
+          async fetch(req) {
+            const url = new URL(req.url);
+
+            // Serve static files from gui/build
+            let filePath = join(guiDir, url.pathname);
+            let file = Bun.file(filePath);
+
+            // Try as-is first, then with index.html
+            if (!(await file.exists())) {
+              filePath = join(guiDir, url.pathname, "index.html");
+              file = Bun.file(filePath);
+            }
+
+            // SPA fallback to index.html
+            const isSPAFallback = !(await file.exists());
+            if (isSPAFallback) {
+              filePath = join(guiDir, "index.html");
+              file = Bun.file(filePath);
+            }
+
+            // Inject API URL into HTML
+            if (filePath.endsWith("index.html")) {
+              const html = await file.text();
+              const apiUrl = `http://${displayHost}:${apiPort}`;
+              const modifiedHtml = html.replace('{{API_URL}}', apiUrl);
+              return new Response(modifiedHtml, {
+                headers: { "Content-Type": "text/html" },
+              });
+            }
+
+            return new Response(file);
+          },
+        });
+
+        log.info(`GUI server running at http://${displayHost}:${guiPort}/`);
+      } else {
+        log.warn(`GUI build not found at ${guiDir}. Run 'cd gui && bun run build' to build the GUI.`);
+      }
     }
-  } else {
-    // Graceful shutdown (GUI disabled)
-    const shutdown = () => {
-      console.log("\nShutting down...");
-      server.stop();
-      process.exit(0);
-    };
-    process.on("SIGINT", shutdown);
-    process.on("SIGTERM", shutdown);
   }
+
+  // Graceful shutdown
+  const shutdown = () => {
+    log.info("Shutting down...");
+    if (guiProcess) guiProcess.kill();
+    server.stop();
+    process.exit(0);
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
 main().catch(error => {
-  console.error("Fatal error:", error);
+  log.error(`Fatal error: ${error}`);
   process.exit(1);
 });

@@ -32,8 +32,6 @@ export interface RouteConfig {
   provider: string;
   /** Model name to use upstream (defaults to original model name) */
   model?: string;
-  /** Priority for matching (higher = checked first) */
-  priority?: number;
 }
 
 // API Scheme Configuration
@@ -73,10 +71,8 @@ export interface RouterConfig {
   schemes?: ApiSchemeConfig[];
   /** Provider configurations */
   providers: Record<string, ProviderConfig>;
-  /** Routing rules */
+  /** Routing rules (matched top-down, put catch-all "*" last) */
   routes: RouteConfig[];
-  /** Default provider for unmatched models */
-  defaultProvider?: string;
 }
 
 // ============================================================================

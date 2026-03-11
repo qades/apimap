@@ -10,9 +10,8 @@ describe("Integration Tests", () => {
       // Setup router
       const router = new Router({
         routes: [
-          { pattern: "gpt-4*", provider: "openai", priority: 100 },
+          { pattern: "gpt-4*", provider: "openai" },
         ],
-        defaultProvider: undefined,
       });
 
       // Setup providers
@@ -55,7 +54,7 @@ describe("Integration Tests", () => {
     test("should route Anthropic request to OpenAI provider", () => {
       const router = new Router({
         routes: [
-          { pattern: "claude-3*", provider: "openai", model: "gpt-4", priority: 100 },
+          { pattern: "claude-3*", provider: "openai", model: "gpt-4" },
         ],
       });
 
@@ -95,7 +94,7 @@ describe("Integration Tests", () => {
     test("should handle wildcard pattern with capture", () => {
       const router = new Router({
         routes: [
-          { pattern: "local/*", provider: "ollama", model: "${1}", priority: 100 },
+          { pattern: "local/*", provider: "ollama", model: "${1}" },
         ],
       });
 
@@ -122,10 +121,11 @@ describe("Integration Tests", () => {
       expect(route?.model).toBe("llama2:13b");
     });
 
-    test("should use default provider when no route matches", () => {
+    test("should use catch-all * as fallback when no specific route matches", () => {
       const router = new Router({
-        routes: [],
-        defaultProvider: "openai",
+        routes: [
+          { pattern: "*", provider: "openai" },
+        ],
       });
 
       const route = router.findRoute("unknown-model");
@@ -136,13 +136,12 @@ describe("Integration Tests", () => {
     test("should handle complex multi-provider setup", () => {
       const router = new Router({
         routes: [
-          { pattern: "claude-3*", provider: "anthropic", priority: 100 },
-          { pattern: "gpt-4*", provider: "openai", priority: 90 },
-          { pattern: "gpt-3.5*", provider: "openai", priority: 80 },
-          { pattern: "local/*", provider: "ollama", model: "${1}", priority: 70 },
-          { pattern: "*", provider: "groq", priority: 10 },
+          { pattern: "claude-3*", provider: "anthropic" },
+          { pattern: "gpt-4*", provider: "openai" },
+          { pattern: "gpt-3.5*", provider: "openai" },
+          { pattern: "local/*", provider: "ollama", model: "${1}" },
+          { pattern: "*", provider: "groq" },
         ],
-        defaultProvider: "openai",
       });
 
       const registry = new ProviderRegistry();
@@ -180,16 +179,15 @@ describe("Integration Tests", () => {
           anthropic: { baseUrl: "https://api.anthropic.com", apiKeyEnv: "ANTHROPIC_API_KEY" },
         },
         routes: [
-          { pattern: "claude-3*", provider: "anthropic", priority: 100 },
-          { pattern: "gpt-4*", provider: "openai", priority: 90 },
+          { pattern: "claude-3*", provider: "anthropic" },
+          { pattern: "gpt-4*", provider: "openai" },
+          { pattern: "*", provider: "openai" },
         ],
-        defaultProvider: "openai",
       };
 
-      // Initialize router
+      // Initialize router (top-down matching)
       const router = new Router({
         routes: config.routes,
-        defaultProvider: config.defaultProvider,
       });
 
       // Initialize providers

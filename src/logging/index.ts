@@ -7,6 +7,7 @@ import { mkdir, writeFile, readFile, readdir, unlink } from "fs/promises";
 import { join } from "path";
 import type { LogEntry, UnroutedRequest } from "../types/index.ts";
 import { EventEmitter } from "events";
+import { log } from "../logger.ts";
 
 export interface LogStats {
   totalRequests: number;
@@ -44,7 +45,7 @@ export class LoggingManager extends EventEmitter {
   setLogDir(dir: string | null): void {
     this.logDir = dir;
     if (dir && !existsSync(dir)) {
-      mkdir(dir, { recursive: true }).catch(console.error);
+      mkdir(dir, { recursive: true }).catch(err => log.error(`Failed to create log dir: ${err}`));
     }
   }
 
@@ -121,7 +122,7 @@ export class LoggingManager extends EventEmitter {
       try {
         await writeFile(filepath, JSON.stringify(entry, null, 2));
       } catch (err) {
-        console.error("Failed to write log:", err);
+        log.error(`Failed to write log: ${err}`);
       }
     }
 
