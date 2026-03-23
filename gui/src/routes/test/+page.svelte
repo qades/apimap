@@ -423,12 +423,13 @@
         
         {#if showAdvanced}
           <div class="px-5 pb-5 pt-2 border-t border-gray-100 space-y-4">
-            <!-- System Message -->
+              <!-- System Message -->
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1.5">
+              <label class="block text-sm font-medium text-gray-700 mb-1.5" for="system-message">
                 System Message
               </label>
               <textarea
+                id="system-message"
                 bind:value={systemMessage}
                 placeholder="Optional system instructions..."
                 rows="2"
@@ -439,11 +440,12 @@
             <div class="grid grid-cols-2 gap-4">
               <!-- Temperature -->
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1.5 flex justify-between">
+                <label class="block text-sm font-medium text-gray-700 mb-1.5 flex justify-between" for="temperature">
                   <span>Temperature</span>
                   <span class="text-blue-600 font-mono">{temperature}</span>
                 </label>
                 <input
+                  id="temperature"
                   type="range"
                   bind:value={temperature}
                   min="0"
@@ -459,11 +461,12 @@
 
               <!-- Max Tokens -->
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1.5 flex justify-between">
+                <label class="block text-sm font-medium text-gray-700 mb-1.5 flex justify-between" for="max-tokens">
                   <span>Max Tokens</span>
                   <span class="text-blue-600 font-mono">{maxTokens}</span>
                 </label>
                 <input
+                  id="max-tokens"
                   type="range"
                   bind:value={maxTokens}
                   min="1"
@@ -476,9 +479,9 @@
 
             <!-- Endpoint Info -->
             <div class="bg-blue-50 rounded-lg p-3">
-              <label class="block text-xs font-medium text-blue-700 mb-1">
+              <p class="block text-xs font-medium text-blue-700 mb-1">
                 Endpoint
-              </label>
+              </p>
               <code class="text-sm text-blue-900 font-mono">
                 {getEndpointInfo(apiFormat).path}
               </code>
@@ -490,9 +493,9 @@
             <div class="grid grid-cols-2 gap-4">
               <!-- API Format -->
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1.5">
+                <span class="block text-sm font-medium text-gray-700 mb-1.5">
                   API Format
-                </label>
+                </span>
                 <div class="flex rounded-lg border border-gray-300 overflow-hidden">
                   <button
                     onclick={() => apiFormat = 'openai'}
@@ -521,9 +524,9 @@
 
               <!-- Stream Toggle -->
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1.5">
+                <span class="block text-sm font-medium text-gray-700 mb-1.5">
                   Streaming
-                </label>
+                </span>
                 <button
                   onclick={() => stream = !stream}
                   class="w-full py-2 px-3 rounded-lg border text-sm font-medium flex items-center justify-center gap-2 transition-colors"

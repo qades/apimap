@@ -279,7 +279,7 @@
             >
               <div class="flex items-center gap-3">
                 <div class="w-9 h-9 rounded-lg {statusColor === 'green' ? 'bg-green-100' : statusColor === 'yellow' ? 'bg-yellow-100' : 'bg-gray-100'} flex items-center justify-center">
-                  <IconComponent class="{statusColor === 'green' ? 'text-green-600' : statusColor === 'yellow' ? 'text-yellow-600' : 'text-gray-400'}" size={18} />
+                  <IconComponent class={statusColor === 'green' ? 'text-green-600' : statusColor === 'yellow' ? 'text-yellow-600' : 'text-gray-400'} size={18} />
                 </div>
                 <div class="text-left">
                   <h3 class="font-semibold text-gray-900 text-sm">{provider.id}</h3>

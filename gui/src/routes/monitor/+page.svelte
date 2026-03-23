@@ -330,16 +330,25 @@
           class:shadow-sm={request.status === 'streaming'}
         >
           <!-- Request Header -->
-          <div class="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+          <button
+            type="button"
+            class="w-full px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors text-left"
             onclick={() => toggleExpand(request.requestId)}
+            onkeydown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggleExpand(request.requestId);
+              }
+            }}
           >
             <div class="flex items-center gap-4">
               <!-- Status Badge -->
               <span class="px-2.5 py-1 rounded-full text-xs font-medium border flex items-center gap-1.5 {getStatusColor(request.status)}">
                 {#if request.status === 'streaming'}
                   <Loader2 size={12} class="animate-spin" />
-                {:else}
-                  <svelte:component this={getStatusIcon(request.status)} size={12} />
+               {:else}
+                   {@const Icon = getStatusIcon(request.status)}
+                   <Icon size={12} />
                 {/if}
                 {request.status}
               </span>
@@ -387,15 +396,15 @@
               {#if request.chunks > 0}
                 <span class="text-xs text-gray-400">{request.chunks} chunks</span>
               {/if}
-              
-              <!-- Expand/Collapse -->
-              {#if expandedRequest === request.requestId}
-                <Minimize2 size={16} class="text-gray-400" />
-              {:else}
-                <Maximize2 size={16} class="text-gray-400" />
-              {/if}
-            </div>
-          </div>
+               
+               <!-- Expand/Collapse -->
+               {#if expandedRequest === request.requestId}
+                 <Minimize2 size={16} class="text-gray-400" />
+               {:else}
+                 <Maximize2 size={16} class="text-gray-400" />
+               {/if}
+             </div>
+           </button>
           
           <!-- Expanded Content -->
           {#if expandedRequest === request.requestId}
