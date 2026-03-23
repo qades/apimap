@@ -130,9 +130,12 @@ describe("Tier 4: Local Providers", () => {
     }
   });
 
-  test("local providers should use localhost URLs", () => {
+  test("local providers should use correct URLs", () => {
     for (const provider of Object.values(TIER4_LOCAL_PROVIDERS)) {
-      expect(provider.defaultBaseUrl).toContain("localhost");
+      const url = provider.defaultBaseUrl;
+      expect(url.startsWith("http://")).toBe(true);
+      expect(url.includes("11434") || url.includes("1234") || url.includes("8080") || 
+             url.includes("8000") || url.includes("5000") || url.includes("5001")).toBe(true);
     }
   });
 });

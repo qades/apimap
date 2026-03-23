@@ -56,6 +56,8 @@ RUN mkdir -p logs config/backups && \
 
 USER apimap
 
+ENV API_MAP_IN_DOCKER=true
+
 # Expose ports
 # API: 3000, GUI: 3001
 EXPOSE 3000 3001

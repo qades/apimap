@@ -1,6 +1,6 @@
 // ============================================================================
 // Built-in Provider Definitions
-// Organized by tier according to BABELFISH_PROVIDERS.md
+// Organized by tier according to API_MAP_PROVIDERS.md
 // ============================================================================
 
 import type { ProviderInfo } from "./types.ts";
@@ -246,12 +246,26 @@ const TIER3_PROVIDERS: Record<string, ProviderInfo> = {
 // TIER 4: LOCAL PROVIDERS
 // ============================================================================
 
+function getLocalProviderBaseUrl(port: number, path: string = "/v1"): string {
+  const isDocker = envVar("API_MAP_IN_DOCKER") === "true" ||
+    envVar("DOCKER_CONTAINER") === "true" ||
+    envVar("RUNNING_IN_DOCKER") === "true";
+  if (isDocker) {
+    return `http://host.containers.internal:${port}${path}`;
+  }
+  return `http://localhost:${port}${path}`;
+}
+
+function envVar(name: string): string | undefined {
+  return Bun.env[name];
+}
+
 const TIER4_LOCAL_PROVIDERS: Record<string, ProviderInfo> = {
   ollama: {
     id: "ollama",
     name: "Ollama",
     description: "Local models via Ollama (Llama, Mistral, Gemma, etc.)",
-    defaultBaseUrl: "http://host.containers.internal:11434",
+    defaultBaseUrl: getLocalProviderBaseUrl(11434),
     authHeader: "Authorization",
     authPrefix: "Bearer ",
     supportsStreaming: true,
@@ -262,7 +276,7 @@ const TIER4_LOCAL_PROVIDERS: Record<string, ProviderInfo> = {
     id: "lmstudio",
     name: "LM Studio",
     description: "Local models via LM Studio",
-    defaultBaseUrl: "http://host.containers.internal:1234/v1",
+    defaultBaseUrl: getLocalProviderBaseUrl(1234, "/v1"),
     authHeader: "Authorization",
     authPrefix: "Bearer ",
     supportsStreaming: true,
@@ -273,7 +287,7 @@ const TIER4_LOCAL_PROVIDERS: Record<string, ProviderInfo> = {
     id: "llamacpp",
     name: "llama.cpp",
     description: "Local models via llama.cpp server",
-    defaultBaseUrl: "http://host.containers.internal:8080/v1",
+    defaultBaseUrl: getLocalProviderBaseUrl(8080, "/v1"),
     authHeader: "Authorization",
     authPrefix: "Bearer ",
     supportsStreaming: true,
@@ -284,7 +298,7 @@ const TIER4_LOCAL_PROVIDERS: Record<string, ProviderInfo> = {
     id: "vllm",
     name: "vLLM",
     description: "High-throughput inference with vLLM and PagedAttention",
-    defaultBaseUrl: "http://host.containers.internal:8000/v1",
+    defaultBaseUrl: getLocalProviderBaseUrl(8000, "/v1"),
     authHeader: "Authorization",
     authPrefix: "Bearer ",
     supportsStreaming: true,
@@ -295,7 +309,7 @@ const TIER4_LOCAL_PROVIDERS: Record<string, ProviderInfo> = {
     id: "localai",
     name: "LocalAI",
     description: "Self-hosted OpenAI-compatible API",
-    defaultBaseUrl: "http://host.containers.internal:8080/v1",
+    defaultBaseUrl: getLocalProviderBaseUrl(8080, "/v1"),
     authHeader: "Authorization",
     authPrefix: "Bearer ",
     supportsStreaming: true,
@@ -306,7 +320,7 @@ const TIER4_LOCAL_PROVIDERS: Record<string, ProviderInfo> = {
     id: "tabbyapi",
     name: "TabbyAPI",
     description: "ExLlamaV2 optimized local inference",
-    defaultBaseUrl: "http://host.containers.internal:5000/v1",
+    defaultBaseUrl: getLocalProviderBaseUrl(5000, "/v1"),
     authHeader: "Authorization",
     authPrefix: "Bearer ",
     supportsStreaming: true,
@@ -317,7 +331,7 @@ const TIER4_LOCAL_PROVIDERS: Record<string, ProviderInfo> = {
     id: "textgenwebui",
     name: "Text Generation WebUI",
     description: "oobabooga Text Generation WebUI",
-    defaultBaseUrl: "http://host.containers.internal:5000/v1",
+    defaultBaseUrl: getLocalProviderBaseUrl(5000, "/v1"),
     authHeader: "Authorization",
     authPrefix: "Bearer ",
     supportsStreaming: true,
@@ -328,7 +342,7 @@ const TIER4_LOCAL_PROVIDERS: Record<string, ProviderInfo> = {
     id: "koboldcpp",
     name: "KoboldCpp",
     description: "KoboldCpp local inference",
-    defaultBaseUrl: "http://host.containers.internal:5001",
+    defaultBaseUrl: getLocalProviderBaseUrl(5001),
     authHeader: "Authorization",
     authPrefix: "Bearer ",
     supportsStreaming: true,

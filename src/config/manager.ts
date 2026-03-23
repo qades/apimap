@@ -545,25 +545,55 @@ export class ConfigManager {
 
     // Check each local provider
     for (const [id, info] of Object.entries(TIER4_LOCAL_PROVIDERS)) {
+      const baseUrl = info.defaultBaseUrl;
+      let found = false;
+      
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 2000);
-        const response = await fetch(info.defaultBaseUrl, {
+        const response = await fetch(baseUrl, {
           signal: controller.signal,
         }).catch(() => null);
         clearTimeout(timeoutId);
 
         if (response && (response.ok || response.status < 500)) {
-          log.info(`  Found ${info.name} at ${info.defaultBaseUrl}`);
+          log.info(`  Found ${info.name} at ${baseUrl}`);
           providers[id] = {
-            baseUrl: info.defaultBaseUrl,
+            baseUrl: baseUrl,
           };
           if (!firstReachableLocal) {
             firstReachableLocal = id;
           }
+          found = true;
         }
       } catch {
-        // Not reachable, skip
+        // First attempt failed, try fallback
+      }
+      
+      // If first attempt failed and baseUrl contains host.containers.internal, try localhost
+      if (!found && baseUrl.includes("host.containers.internal")) {
+        const fallbackUrl = baseUrl.replace("host.containers.internal", "localhost");
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
+          const response = await fetch(fallbackUrl, {
+            signal: controller.signal,
+          }).catch(() => null);
+          clearTimeout(timeoutId);
+
+          if (response && (response.ok || response.status < 500)) {
+            log.info(`  Found ${info.name} at ${fallbackUrl} (fallback)`);
+            providers[id] = {
+              baseUrl: fallbackUrl,
+            };
+            if (!firstReachableLocal) {
+              firstReachableLocal = id;
+            }
+            found = true;
+          }
+        } catch {
+          // Fallback also failed
+        }
       }
     }
 
