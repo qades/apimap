@@ -5,7 +5,7 @@
 
 import type { Server, ServerWebSocket } from "bun";
 import { existsSync } from "fs";
-import { mkdir } from "fs/promises";
+import { mkdir, stat as statAsync } from "fs/promises";
 import { join, dirname } from "path";
 import { hostname as getHostname } from "os";
 
@@ -209,6 +209,15 @@ function getSchemePath(scheme: { id: string; path?: string; format: string }): s
 // ============================================================================
 // Utility Functions
 // ============================================================================
+
+async function filePathStat(filePath: string): Promise<{ isDirectory: () => boolean } | null> {
+  try {
+    const s = await statAsync(filePath);
+    return s;
+  } catch {
+    return null;
+  }
+}
 
 function generateRequestId(): string {
   return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 11)}`;
@@ -2064,7 +2073,10 @@ ${boxBottom()}
           {
             cwd: guiDir,
             stdio: ["ignore", "inherit", "inherit"],
-            env: process.env,
+            env: {
+              ...process.env,
+              API_PORT: String(apiPort),
+            },
           }
         );
         log.info(`GUI dev server at http://${displayHost}:${guiPort}/`);
@@ -2083,26 +2095,29 @@ ${boxBottom()}
           async fetch(req) {
             const url = new URL(req.url);
 
-            // Serve static files from gui/build
+            // Determine file path
             let filePath = join(guiDir, url.pathname);
-            let file = Bun.file(filePath);
-
-            // Try as-is first, then with index.html
-            if (!(await file.exists())) {
-              filePath = join(guiDir, url.pathname, "index.html");
-              file = Bun.file(filePath);
+            
+            // Check if it's a directory or doesn't exist - serve index.html
+            let stat;
+            try {
+              stat = await filePathStat(filePath);
+            } catch {
+              stat = null;
             }
-
-            // SPA fallback to index.html
-            const isSPAFallback = !(await file.exists());
-            if (isSPAFallback) {
+            
+            const isIndexHtml = !stat || stat.isDirectory() || url.pathname === "/" || url.pathname === "/index.html";
+            
+            if (isIndexHtml) {
               filePath = join(guiDir, "index.html");
-              file = Bun.file(filePath);
+              const content = await Bun.file(filePath).text();
+              const injected = content.replace('"{{API_PORT}}"', String(apiPort));
+              return new Response(injected, {
+                headers: { "Content-Type": "text/html" },
+              });
             }
 
- 
-
-            return new Response(file);
+            return new Response(Bun.file(filePath));
           },
         });
 

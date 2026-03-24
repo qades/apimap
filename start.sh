@@ -47,17 +47,17 @@ fi
 # if config/config.yaml doesn't exist
 
 # Start API server with hot reload (auto-launches GUI dev server)
-echo "🚀 Starting API server (hot reload) on http://0.0.0.0:3000..."
-echo "🎨 GUI will be available at http://0.0.0.0:3001"
+echo "🚀 Starting API server with hot reload..."
+echo "   (actual ports will be shown when server starts)"
 echo ""
 bun --hot src/server.ts &
 API_PID=$!
 
 echo ""
 echo "╔════════════════════════════════════════════════════════════╗"
-echo "║  API Server:  http://0.0.0.0:3000                        ║"
-echo "║  GUI:         http://0.0.0.0:3001                        ║"
+echo "║  API Map - Starting...                                     ║"
 echo "║                                                            ║"
+echo "║  Waiting for server to start...                            ║"
 echo "║  Press Ctrl+C to stop                                      ║"
 echo "╚════════════════════════════════════════════════════════════╝"
 echo ""

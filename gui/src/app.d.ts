@@ -8,6 +8,11 @@ declare global {
 		// interface PageState {}
 		// interface Platform {}
 	}
+	
+	// API port injected by server into index.html
+	interface Window {
+		API_PORT?: string;
+	}
 }
 
 export {};

@@ -1,12 +1,22 @@
 // API client for the management API
-export function resolveApiUrl(): string {
+// API port is injected by the server into index.html
+
+export function getApiUrl(): string {
   if (typeof window !== 'undefined') {
-    // Use the same hostname the browser used to reach the GUI, but on API port
-    return `${window.location.protocol}//${window.location.hostname}:3000`;
+    // Use injected API port if it's a valid number, fallback to same port as GUI (for proxy mode)
+    const injectedPort = window.API_PORT;
+    const port = (injectedPort && /^\d+$/.test(String(injectedPort))) 
+      ? injectedPort 
+      : window.location.port;
+    return `${window.location.protocol}//${window.location.hostname}:${port}`;
   }
   return 'http://localhost:3000';
 }
-const API_URL = resolveApiUrl();
+
+// Backwards compatibility alias
+export const resolveApiUrl = getApiUrl;
+
+const API_URL = getApiUrl();
 const API_BASE = `${API_URL}/admin`;
 
 export interface SystemStatus {
@@ -269,7 +279,7 @@ export const testModelApi = {
     stream?: boolean;
     apiFormat?: 'openai' | 'anthropic';
   }) => {
-    const apiUrl = await serverInfoApi.getApiUrl();
+    const apiUrl = serverInfoApi.getApiUrl();
     const isAnthropic = params.apiFormat === 'anthropic';
     const endpoint = isAnthropic ? '/v1/messages' : '/v1/chat/completions';
     
