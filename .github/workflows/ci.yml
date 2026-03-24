@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main, master, develop]
+    tags: ['v*']
   pull_request:
     branches: [main, master, develop]
 
@@ -77,7 +78,7 @@ jobs:
   release:
     needs: build-docker
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
       packages: write
@@ -116,6 +117,7 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
           draft: true
           generate_release_notes: true
           body_path: release_notes.md
