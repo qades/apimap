@@ -2145,16 +2145,26 @@ ${boxBottom()}
             if (isIndexHtml) {
               filePath = join(guiDir, "index.html");
               const content = await Bun.file(filePath).text();
-              // Build API config object with port, externalPort, and host
+              
+              // Derive the host from the request headers (for browser-resolvable hostname)
+              // X-Forwarded-Host for proxy scenarios, otherwise use the Host header
+              const requestHost = req.headers.get('x-forwarded-host') || req.headers.get('host') || displayHost;
+              // Remove port from host if present (we handle port separately)
+              const hostWithoutPort = requestHost.split(':')[0];
+              
+              // Determine protocol from headers or default to http
+              const protocol = req.headers.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+              
               // externalPort is used when the API is behind a proxy/container with port mapping
+              const externalPort = config.server?.externalPort ?? apiPort;
+              
+              // Build API config object with port, externalPort, and host
               const apiConfig = {
                 port: apiPort,
-                externalPort: config.server?.externalPort ?? apiPort,
-                host: displayHost,
-                // Use externalPort for the URL if it differs from internal port
-                url: config.server?.externalPort 
-                  ? `${req.headers.get('x-forwarded-proto') === 'https' ? 'https' : 'http'}://${displayHost}:${config.server?.externalPort}`
-                  : `${req.headers.get('x-forwarded-proto') === 'https' ? 'https' : 'http'}://${displayHost}:${apiPort}`
+                externalPort: externalPort,
+                host: hostWithoutPort,
+                // Build URL using browser-resolvable host and external port
+                url: `${protocol}://${hostWithoutPort}:${externalPort}`
               };
               // Replace the entire API_CONFIG assignment, handling both placeholder format
               // and pre-rendered values from the build process

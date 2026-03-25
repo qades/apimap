@@ -5,23 +5,38 @@ export async function handle({ event, resolve }) {
 	if (response.headers.get('content-type')?.includes('text/html')) {
 		const port = parseInt(process.env.VITE_API_PORT || '3000', 10);
 		const externalPort = parseInt(process.env.VITE_API_EXTERNAL_PORT || String(port), 10);
-		const host = process.env.VITE_API_HOST || 'localhost';
 		
-		// Build the API config object
-		const apiConfig = {
-			port,
-			externalPort,
-			host,
-			url: `http://${host}:${externalPort}`
-		};
+		// In dev mode, inject a script that reads host from browser's location
+		// This ensures it works regardless of how the user accesses the GUI
+		const apiConfigScript = `
+<script>
+(function() {
+	var host = window.location.hostname;
+	var protocol = window.location.protocol === 'https:' ? 'https' : 'http';
+	window.API_CONFIG = {
+		port: ${port},
+		externalPort: ${externalPort},
+		host: host,
+		url: protocol + '://' + host + ':' + ${externalPort}
+	};
+})();
+</script>`;
 		
 		const originalText = await response.text();
-		// Replace the entire API_CONFIG assignment, handling both placeholder format
-		// and pre-rendered values from the build process
-		const modifiedText = originalText.replace(
-			/window\.API_CONFIG\s*=\s*["']?\{\{API_CONFIG\}\}["']?|window\.API_CONFIG\s*=\s*\{[^}]+\}/,
-			`window.API_CONFIG = ${JSON.stringify(apiConfig)}`
-		);
+		
+		// Replace the API_CONFIG placeholder with the dynamic script
+		// or insert it before the closing </head> tag
+		let modifiedText;
+		if (originalText.includes('window.API_CONFIG')) {
+			// Replace existing API_CONFIG assignment
+			modifiedText = originalText.replace(
+				/window\.API_CONFIG\s*=\s*["']?\{\{API_CONFIG\}\}["']?|window\.API_CONFIG\s*=\s*\{[^}]+\};/,
+				apiConfigScript
+			);
+		} else {
+			// Insert before </head>
+			modifiedText = originalText.replace('</head>', apiConfigScript + '</head>');
+		}
 		
 		return new Response(modifiedText, {
 			status: response.status,
