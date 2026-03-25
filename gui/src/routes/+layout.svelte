@@ -14,6 +14,7 @@
     Activity as MonitorIcon
   } from '@lucide/svelte';
   import { page } from '$app/stores';
+  import { serverInfoApi } from '$lib/utils/api';
 
   interface Props {
     children?: import('svelte').Snippet;
@@ -22,6 +23,8 @@
   let { children }: Props = $props();
 
   let mobileMenuOpen = $state(false);
+  let version = $state<string>('2.0.0');
+  let commitHash = $state<string>('...');
 
   const navItems = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -49,6 +52,16 @@
   }
 
   let currentPath = $derived($page.url.pathname);
+  
+  onMount(async () => {
+    try {
+      const info = await serverInfoApi.get();
+      version = info.version;
+      commitHash = info.commitHash;
+    } catch {
+      commitHash = 'unknown';
+    }
+  });
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -103,8 +116,8 @@
   </aside>
 
   <!-- Main content -->
-  <main class="lg:ml-64 min-h-screen pt-14 lg:pt-0">
-    <div class="p-4 lg:p-8 max-w-7xl mx-auto">
+  <main class="lg:ml-64 min-h-screen pt-14 lg:pt-0 pb-12">
+    <div class="p-4 lg:p-8 max-w-7xl mx-auto h-full">
       {#if children}
         {@render children()}
       {/if}
@@ -120,4 +133,11 @@
       aria-label="Close menu"
     ></button>
   {/if}
+  
+  <!-- Footer -->
+  <footer class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-2 text-center">
+    <p class="text-xs text-gray-500">
+      API Map v{version} &bull; commit {commitHash}
+    </p>
+  </footer>
 </div>

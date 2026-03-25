@@ -22,6 +22,7 @@ const API_BASE = `${API_URL}/admin`;
 export interface SystemStatus {
   status: string;
   version: string;
+  commitHash: string;
   uptime: number;
   configPath: string;
   providers: string[];
@@ -254,6 +255,7 @@ export const modelsApi = {
 export interface ServerInfo {
   apiUrl: string;
   version: string;
+  commitHash: string;
   uptime: number;
 }
 

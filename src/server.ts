@@ -26,6 +26,7 @@ import { LoggingManager } from "./logging/index.ts";
 import { Router } from "./router/index.ts";
 import * as transformers from "./transformers/index.ts";
 import { log, setLogLevel } from "./logger.ts";
+import { execSync } from "child_process";
 
 // ============================================================================
 // Server State
@@ -36,6 +37,7 @@ interface ServerState {
   router: Router;
   logging: LoggingManager;
   version: string;
+  commitHash: string;
   startTime: Date;
 }
 
@@ -1016,6 +1018,7 @@ async function handleStatusRequest(headers: Record<string, string>): Promise<Res
   return new Response(JSON.stringify({
     status: "ok",
     version: state.version,
+    commitHash: state.commitHash,
     uptime: Math.floor((Date.now() - state.startTime.getTime()) / 1000),
     configPath: state.config.getConfigPath(),
     providers: Object.keys(config.providers),
@@ -1299,6 +1302,7 @@ function handleGetServerInfo(headers: Record<string, string>, actualPort: number
   return new Response(JSON.stringify({
     apiUrl: `${protocol}://${host}:${port}`,
     version: state.version,
+    commitHash: state.commitHash,
     uptime: Math.floor((Date.now() - state.startTime.getTime()) / 1000),
   }), { headers: { "Content-Type": "application/json", ...headers } });
 }
@@ -1810,24 +1814,32 @@ async function main() {
   const configManager = new ConfigManager(configPath);
 
   try {
-    await configManager.load();
-  } catch (error) {
-    log.warn(`Config not found: ${configManager.getConfigPath()}`);
+     await configManager.load();
+   } catch (error) {
+     log.warn(`Config not found: ${configManager.getConfigPath()}`);
 
-    // First-time: auto-detect reachable providers
-    const defaultConfig = await ConfigManager.createInitialConfig(configPath);
+     // First-time: auto-detect reachable providers
+     const defaultConfig = await ConfigManager.createInitialConfig(configPath);
 
-    // Apply CLI overrides
-    if (args.port) defaultConfig.server!.port = parseInt(args.port, 10);
-    if (args["external-port"]) defaultConfig.server!.externalPort = parseInt(args["external-port"], 10);
-    if (args.timeout) defaultConfig.server!.timeout = parseInt(args.timeout, 10);
-    if (args["log-dir"]) defaultConfig.logging!.dir = args["log-dir"];
+     // Apply CLI overrides
+     if (args.port) defaultConfig.server!.port = parseInt(args.port, 10);
+     if (args["external-port"]) defaultConfig.server!.externalPort = parseInt(args["external-port"], 10);
+     if (args.timeout) defaultConfig.server!.timeout = parseInt(args.timeout, 10);
+     if (args["log-dir"]) defaultConfig.logging!.dir = args["log-dir"];
 
-    await configManager.save(defaultConfig, false);
-    log.info(`Config created at: ${configManager.getConfigPath()}`);
-  }
+     await configManager.save(defaultConfig, false);
+     log.info(`Config created at: ${configManager.getConfigPath()}`);
+   }
 
-const config = configManager.getConfig();
+   const config = configManager.getConfig();
+   
+   const commitHash = (() => {
+     try {
+       return execSync("git rev-parse --short HEAD", { encoding: "utf-8" }).trim();
+     } catch {
+       return "unknown";
+     }
+   })();
 
   // Apply CLI overrides
   if (cliPort !== undefined) {
@@ -1863,6 +1875,7 @@ const config = configManager.getConfig();
     router,
     logging: loggingManager,
     version: "2.0.0",
+    commitHash,
     startTime: new Date(),
   };
 
