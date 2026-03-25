@@ -19,6 +19,7 @@
 server:
   port: 3000                    # Port to listen on
   host: "0.0.0.0"              # Host to bind to (0.0.0.0 = all interfaces)
+  # externalPort: 3000          # External port for container mappings (null = use port)
   cors:
     origin: "*"                # CORS origin (* = any, or specific domain)
     credentials: false         # Allow credentials

@@ -77,8 +77,8 @@
     
     try {
       // Get API URL and connect to WebSocket on API server
-      const apiUrl = await serverInfoApi.getApiUrl();
-      const wsUrl = apiUrl.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws';
+      const serverInfo = await serverInfoApi.get();
+      const wsUrl = serverInfo.apiUrl.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws';
       ws = new WebSocket(wsUrl);
       
       ws.onopen = () => {

@@ -5,6 +5,7 @@
 
 server:
   port: 3000
+  # externalPort: 3000          # External port for container mappings (uncomment if needed)
   cors:
     origin: "*"
   timeout: 120

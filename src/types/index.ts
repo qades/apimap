@@ -48,13 +48,14 @@ export interface ApiSchemeConfig {
 export interface RouterConfig {
   /** Server configuration */
   server?: {
-    port?: number;
-    host?: string;
+    port?: number;                      // Port to listen on
+    host?: string;                      // Host to bind to (e.g., "0.0.0.0", "localhost")
+    externalPort?: number;              // External port for container mappings (e.g., Docker port forwarding)
     cors?: {
       origin?: string | string[];
       credentials?: boolean;
     };
-    timeout?: number;
+    timeout?: number;                   // Request timeout in seconds
   };
   /** Logging configuration */
   logging?: {

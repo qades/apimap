@@ -167,6 +167,7 @@ ${line("")}
 ${line("Options:")}
 ${line("  --config <path>        Path to YAML config (default: config/config.yaml)")}
 ${line("  --port <number>        Override port from config")}
+${line("  --external-port <num>  Override external port (for container mappings)")}
 ${line("  --log-dir <path>       Override log directory from config")}
 ${line("  --timeout <seconds>    Override timeout from config")}
 ${line("  --gui-port <number>    Port for management GUI (default: 3001)")}
@@ -181,6 +182,8 @@ ${line("  bun run src/server.ts")}
 ${line("")}
 ${line("  # Custom config and ports")}
 ${line("  bun run src/server.ts --config ./my-config.yaml --port 8080 --gui-port 8081")}
+${line("  # With container port mapping (external port 8080, internal port 3000)")}
+${line("  bun run src/server.ts --port 3000 --external-port 8080 --gui-port 8081")}
 ${line("")}
 ${line("  # Disable GUI")}
 ${line("  bun run src/server.ts --no-gui")}
@@ -1287,11 +1290,14 @@ async function handleGetLogs(url: URL, headers: Record<string, string>): Promise
 
 function handleGetServerInfo(headers: Record<string, string>, actualPort: number): Response {
   // Use the same logic as display hostname - prefer actual hostname over localhost
-  const host = getDisplayHostname(undefined, state.config.getConfig().server?.host);
+  const config = state.config.getConfig();
+  const host = getDisplayHostname(undefined, config.server?.host);
   const protocol = "http";
+  // Use external port if configured (for container port mappings), otherwise use actual port
+  const port = config.server?.externalPort ?? actualPort;
   
   return new Response(JSON.stringify({
-    apiUrl: `${protocol}://${host}:${actualPort}`,
+    apiUrl: `${protocol}://${host}:${port}`,
     version: state.version,
     uptime: Math.floor((Date.now() - state.startTime.getTime()) / 1000),
   }), { headers: { "Content-Type": "application/json", ...headers } });
@@ -1790,6 +1796,10 @@ async function main() {
   const configPath = args.config || "config/config.yaml";
   const guiPort = args["no-gui"] ? 0 : (args["gui-port"] ? parseInt(args["gui-port"], 10) : 3001);
   const isDev = process.argv.includes("--hot") || !!process.env.BUN_HOT;
+  
+  // CLI overrides for server config (will be applied after config load)
+  const cliPort = args.port ? parseInt(args.port, 10) : undefined;
+  const cliExternalPort = args["external-port"] ? parseInt(args["external-port"], 10) : undefined;
 
   // Set log level from CLI arg early
   if (args["log-level"]) {
@@ -1809,6 +1819,7 @@ async function main() {
 
     // Apply CLI overrides
     if (args.port) defaultConfig.server!.port = parseInt(args.port, 10);
+    if (args["external-port"]) defaultConfig.server!.externalPort = parseInt(args["external-port"], 10);
     if (args.timeout) defaultConfig.server!.timeout = parseInt(args.timeout, 10);
     if (args["log-dir"]) defaultConfig.logging!.dir = args["log-dir"];
 
@@ -1816,8 +1827,16 @@ async function main() {
     log.info(`Config created at: ${configManager.getConfigPath()}`);
   }
 
-  const config = configManager.getConfig();
+const config = configManager.getConfig();
 
+  // Apply CLI overrides
+  if (cliPort !== undefined) {
+    config.server!.port = cliPort;
+  }
+  if (cliExternalPort !== undefined) {
+    config.server!.externalPort = cliExternalPort;
+  }
+  
   // Set log level from config (CLI takes precedence, already set above)
   if (!args["log-level"] && config.logging?.level) {
     setLogLevel(config.logging.level);
@@ -1858,7 +1877,7 @@ async function main() {
   });
 
   // Override port from CLI
-  apiPort = args.port ? parseInt(args.port, 10) : (config.server?.port || 3000);
+  apiPort = cliPort ?? (config.server?.port || 3000);
   const host = config.server?.host || "0.0.0.0";
   const displayHost = getDisplayHostname(args.hostname, config.server?.host);
 
