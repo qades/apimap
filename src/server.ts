@@ -2107,7 +2107,9 @@ ${boxBottom()}
             stdio: ["ignore", "inherit", "inherit"],
             env: {
               ...process.env,
-              API_PORT: String(apiPort),
+              VITE_API_PORT: String(apiPort),
+              VITE_API_EXTERNAL_PORT: String(config.server?.externalPort ?? apiPort),
+              VITE_API_HOST: displayHost,
             },
           }
         );
@@ -2143,7 +2145,23 @@ ${boxBottom()}
             if (isIndexHtml) {
               filePath = join(guiDir, "index.html");
               const content = await Bun.file(filePath).text();
-              const injected = content.replace('"{{API_PORT}}"', String(apiPort));
+              // Build API config object with port, externalPort, and host
+              // externalPort is used when the API is behind a proxy/container with port mapping
+              const apiConfig = {
+                port: apiPort,
+                externalPort: config.server?.externalPort ?? apiPort,
+                host: displayHost,
+                // Use externalPort for the URL if it differs from internal port
+                url: config.server?.externalPort 
+                  ? `${req.headers.get('x-forwarded-proto') === 'https' ? 'https' : 'http'}://${displayHost}:${config.server?.externalPort}`
+                  : `${req.headers.get('x-forwarded-proto') === 'https' ? 'https' : 'http'}://${displayHost}:${apiPort}`
+              };
+              // Replace the entire API_CONFIG assignment, handling both placeholder format
+              // and pre-rendered values from the build process
+              const injected = content.replace(
+                /window\.API_CONFIG\s*=\s*["']?\{\{API_CONFIG\}\}["']?|window\.API_CONFIG\s*=\s*\{[^}]+\}/,
+                `window.API_CONFIG = ${JSON.stringify(apiConfig)}`
+              );
               return new Response(injected, {
                 headers: { "Content-Type": "text/html" },
               });

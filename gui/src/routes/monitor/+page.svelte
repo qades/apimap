@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { serverInfoApi } from '$lib/utils/api';
+  import { getWsUrl } from '$lib/utils/api';
   import { onMount, onDestroy } from 'svelte';
   import { 
     Activity, 
@@ -76,9 +76,9 @@
     connecting = true;
     
     try {
-      // Get API URL and connect to WebSocket on API server
-      const serverInfo = await serverInfoApi.get();
-      const wsUrl = serverInfo.apiUrl.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws';
+      // Get WebSocket URL from injected config (no extra API call needed)
+      // This handles externalPort for container/proxy scenarios automatically
+      const wsUrl = getWsUrl() + '/ws';
       ws = new WebSocket(wsUrl);
       
       ws.onopen = () => {

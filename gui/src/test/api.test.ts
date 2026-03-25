@@ -2,7 +2,8 @@
  * Tests for API utilities
  */
 
-import { describe, it, expect, beforeEach, jest } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, jest } from 'bun:test';
+import { getApiConfig, getApiUrl, getWsUrl } from '../lib/utils/api';
 
 describe('API Client', () => {
   beforeEach(() => {
@@ -179,5 +180,214 @@ describe('Endpoint Path Selection', () => {
     expect(endpointOptions[0].value).toBe('/chat/completions');
     expect(endpointOptions[1].value).toBe('/v1/messages');
     expect(endpointOptions[2].value).toBe('/completions');
+  });
+});
+
+describe('API Configuration', () => {
+  const originalWindow = globalThis.window;
+
+  beforeEach(() => {
+    // Clean up window.API_CONFIG before each test
+    // @ts-expect-error - cleaning up global
+    delete globalThis.window?.API_CONFIG;
+    // @ts-expect-error - cleaning up global
+    delete globalThis.window?.API_PORT;
+  });
+
+  afterEach(() => {
+    // Restore window
+    // @ts-expect-error - restoring global
+    globalThis.window = originalWindow;
+  });
+
+  describe('getApiConfig', () => {
+    it('should return injected API_CONFIG when available', () => {
+      const mockConfig = {
+        port: 3000,
+        externalPort: 8080,
+        host: 'example.com',
+        url: 'http://example.com:8080'
+      };
+      
+      // @ts-expect-error - mocking window
+      globalThis.window = { API_CONFIG: mockConfig };
+      
+      const config = getApiConfig();
+      expect(config).toEqual(mockConfig);
+    });
+
+    it('should return legacy API_PORT config when API_CONFIG not available', () => {
+      // @ts-expect-error - mocking window
+      globalThis.window = { API_PORT: 3000 };
+      
+      const config = getApiConfig();
+      expect(config.port).toBe(3000);
+      expect(config.externalPort).toBe(3000);
+      expect(config.url).toContain('3000');
+    });
+
+    it('should return fallback config when no window is available', () => {
+      // @ts-expect-error - removing window
+      globalThis.window = undefined;
+      
+      const config = getApiConfig();
+      // Fallback uses import.meta.env.VITE_API_PORT or defaults to 3000
+      // In test environment, this might be set to a different value
+      expect(config.port).toBeDefined();
+      expect(config.externalPort).toBe(config.port);
+      expect(config.host).toBeDefined();
+      expect(config.url).toBeDefined();
+    });
+
+    it('should handle different externalPort from port (container scenario)', () => {
+      const mockConfig = {
+        port: 3000,
+        externalPort: 8080,  // Different - container port mapping
+        host: 'localhost',
+        url: 'http://localhost:8080'
+      };
+      
+      // @ts-expect-error - mocking window
+      globalThis.window = { API_CONFIG: mockConfig };
+      
+      const config = getApiConfig();
+      expect(config.port).toBe(3000);        // Internal port
+      expect(config.externalPort).toBe(8080); // External port for browser
+      expect(config.url).toBe('http://localhost:8080');
+    });
+  });
+
+  describe('getApiUrl', () => {
+    it('should return the full API URL from injected config', () => {
+      const mockConfig = {
+        port: 3000,
+        externalPort: 8080,
+        host: 'api.example.com',
+        url: 'http://api.example.com:8080'
+      };
+      
+      // @ts-expect-error - mocking window
+      globalThis.window = { API_CONFIG: mockConfig };
+      
+      const url = getApiUrl();
+      expect(url).toBe('http://api.example.com:8080');
+    });
+
+    it('should work with localhost in development', () => {
+      const mockConfig = {
+        port: 3000,
+        externalPort: 3000,
+        host: 'localhost',
+        url: 'http://localhost:3000'
+      };
+      
+      // @ts-expect-error - mocking window
+      globalThis.window = { API_CONFIG: mockConfig };
+      
+      const url = getApiUrl();
+      expect(url).toBe('http://localhost:3000');
+    });
+  });
+
+  describe('getWsUrl', () => {
+    it('should convert HTTP URL to WS URL', () => {
+      const mockConfig = {
+        port: 3000,
+        externalPort: 8080,
+        host: 'localhost',
+        url: 'http://localhost:8080'
+      };
+      
+      // @ts-expect-error - mocking window
+      globalThis.window = { API_CONFIG: mockConfig };
+      
+      const wsUrl = getWsUrl();
+      expect(wsUrl).toBe('ws://localhost:8080');
+    });
+
+    it('should convert HTTPS URL to WSS URL', () => {
+      const mockConfig = {
+        port: 3000,
+        externalPort: 443,
+        host: 'api.example.com',
+        url: 'https://api.example.com:443'
+      };
+      
+      // @ts-expect-error - mocking window
+      globalThis.window = { API_CONFIG: mockConfig };
+      
+      const wsUrl = getWsUrl();
+      expect(wsUrl).toBe('wss://api.example.com:443');
+    });
+
+    it('should use externalPort for WebSocket connections', () => {
+      // This tests the container scenario where API listens on 3000
+      // but browser accesses via 8080
+      const mockConfig = {
+        port: 3000,           // Internal port (API listens here)
+        externalPort: 8080,   // External port (browser uses this)
+        host: 'router.local',
+        url: 'http://router.local:8080'
+      };
+      
+      // @ts-expect-error - mocking window
+      globalThis.window = { API_CONFIG: mockConfig };
+      
+      const wsUrl = getWsUrl();
+      expect(wsUrl).toBe('ws://router.local:8080');
+      expect(wsUrl).not.toContain('3000'); // Should not use internal port
+    });
+  });
+
+  describe('Container/Proxy Scenarios', () => {
+    it('should handle Docker port mapping scenario (3000 -> 8080)', () => {
+      // Docker: -p 8080:3000 (host:container)
+      const mockConfig = {
+        port: 3000,        // API listens on 3000 inside container
+        externalPort: 8080, // Browser accesses via 8080 on host
+        host: 'localhost',
+        url: 'http://localhost:8080'
+      };
+      
+      // @ts-expect-error - mocking window
+      globalThis.window = { API_CONFIG: mockConfig };
+      
+      const config = getApiConfig();
+      expect(config.url).toBe('http://localhost:8080');
+      expect(getApiUrl()).toBe('http://localhost:8080');
+      expect(getWsUrl()).toBe('ws://localhost:8080');
+    });
+
+    it('should handle reverse proxy scenario (443 -> 3000)', () => {
+      // Nginx/Traefik proxying 443 to 3000
+      const mockConfig = {
+        port: 3000,
+        externalPort: 443,
+        host: 'api.example.com',
+        url: 'https://api.example.com:443'
+      };
+      
+      // @ts-expect-error - mocking window
+      globalThis.window = { API_CONFIG: mockConfig };
+      
+      expect(getApiUrl()).toBe('https://api.example.com:443');
+      expect(getWsUrl()).toBe('wss://api.example.com:443');
+    });
+
+    it('should handle same port scenario (no proxy)', () => {
+      // Direct access without proxy
+      const mockConfig = {
+        port: 3000,
+        externalPort: 3000,
+        host: 'localhost',
+        url: 'http://localhost:3000'
+      };
+      
+      // @ts-expect-error - mocking window
+      globalThis.window = { API_CONFIG: mockConfig };
+      
+      expect(getApiUrl()).toBe('http://localhost:3000');
+      expect(getWsUrl()).toBe('ws://localhost:3000');
+    });
   });
 });

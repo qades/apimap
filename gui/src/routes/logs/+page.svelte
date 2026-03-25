@@ -16,11 +16,7 @@
     AlertTriangle
   } from '@lucide/svelte';
   import type { LogEntry } from '$lib/utils/api';
-
-  // API URL is injected by GUI server
-  const API_URL = typeof window !== 'undefined' && (window as any).API_URL
-    ? (window as any).API_URL
-    : 'http://localhost:3000';
+  import { getWsUrl } from '$lib/utils/api';
 
   let logs = $state<LogEntry[]>([]);
   let error: string | null = $state(null);
@@ -42,7 +38,8 @@
     connecting = true;
 
     try {
-      const wsUrl = API_URL.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws';
+      // Get WebSocket URL from injected config (handles externalPort automatically)
+      const wsUrl = getWsUrl() + '/ws';
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {

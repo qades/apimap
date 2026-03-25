@@ -1,16 +1,76 @@
 // API client for the management API
-// API port is injected by the server into index.html
+// API configuration is injected by the server into index.html as window.API_CONFIG
 
-export function getApiUrl(): string {
+export interface ApiConfig {
+  /** Internal port the API server listens on */
+  port: number;
+  /** External port (for container/port mapping scenarios) */
+  externalPort: number;
+  /** Hostname for API connections */
+  host: string;
+  /** Full base URL for API connections */
+  url: string;
+}
+
+/**
+ * Get the API configuration injected by the server.
+ * Falls back to environment variables in dev mode or defaults.
+ */
+export function getApiConfig(): ApiConfig {
   if (typeof window !== 'undefined') {
-    // Use injected API port if it's a valid number, fallback to same port as GUI (for proxy mode)
-    const injectedPort = window.API_PORT;
-    const port = (injectedPort && /^\d+$/.test(String(injectedPort))) 
-      ? injectedPort 
-      : window.location.port;
-    return `${window.location.protocol}//${window.location.hostname}:${port}`;
+    // Production: use injected config
+    if (window.API_CONFIG) {
+      return window.API_CONFIG;
+    }
+    
+    // Legacy support: old API_PORT injection
+    if (window.API_PORT) {
+      const host = window.location?.hostname || 'localhost';
+      const protocol = window.location?.protocol || 'http:';
+      return {
+        port: window.API_PORT,
+        externalPort: window.API_PORT,
+        host,
+        url: `${protocol}//${host}:${window.API_PORT}`
+      };
+    }
   }
-  return 'http://localhost:3000';
+  
+  // Dev mode: use environment variables
+  const port = parseInt(import.meta.env.VITE_API_PORT || '3000', 10);
+  const externalPort = parseInt(import.meta.env.VITE_API_EXTERNAL_PORT || String(port), 10);
+  const host = import.meta.env.VITE_API_HOST || 'localhost';
+  
+  // In browser, use current location's protocol
+  const protocol = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+  const urlHost = typeof window !== 'undefined' ? window.location.hostname : host;
+  
+  return {
+    port,
+    externalPort,
+    host: urlHost,
+    url: `${protocol}//${urlHost}:${externalPort}`
+  };
+}
+
+/**
+ * Get the base API URL for making requests.
+ * Uses external port when different from internal port (for container/proxy scenarios).
+ */
+export function getApiUrl(): string {
+  const config = getApiConfig();
+  return config.url;
+}
+
+/**
+ * Get the WebSocket URL for real-time connections.
+ * Converts HTTP(S) to WS(S) protocol automatically.
+ */
+export function getWsUrl(): string {
+  const apiUrl = getApiUrl();
+  return apiUrl
+    .replace('http://', 'ws://')
+    .replace('https://', 'wss://');
 }
 
 // Backwards compatibility alias

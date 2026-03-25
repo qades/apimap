@@ -10,4 +10,5 @@ export default defineConfig({
 	css: {
 		devSourcemap: true,
 	},
+	envPrefix: 'VITE_',
 });
