@@ -234,23 +234,46 @@ class DockerComposeManager {
   }
 
   private async tryComposeUp(env: NodeJS.ProcessEnv): Promise<number> {
-    // Try docker-compose first (podman-compose standalone works without daemon)
-    const proc1 = Bun.spawn(['docker-compose', 'up', '-d', 'mock-server', 'litellm', 'apimap'], {
-      env,
-      stdout: 'inherit',
-      stderr: 'pipe',
-    });
-    const exitCode1 = await proc1.exited;
-    if (exitCode1 === 0) return 0;
+    // Check which compose command is available
+    const hasDockerCompose = await this.commandExists('docker-compose');
+    const hasDockerPlugin = await this.commandExists('docker');
     
-    // Fall back to docker compose (Docker Compose plugin)
-    console.log('  docker-compose failed, trying docker compose...');
-    const proc2 = Bun.spawn(['docker', 'compose', 'up', '-d', 'mock-server', 'litellm', 'apimap'], {
-      env,
-      stdout: 'inherit',
-      stderr: 'inherit',
-    });
-    return await proc2.exited;
+    if (hasDockerCompose) {
+      // Try docker-compose first (podman-compose standalone works without daemon)
+      const proc1 = Bun.spawn(['docker-compose', 'up', '-d', 'mock-server', 'litellm', 'apimap'], {
+        env,
+        stdout: 'inherit',
+        stderr: 'pipe',
+      });
+      const exitCode1 = await proc1.exited;
+      if (exitCode1 === 0) return 0;
+    }
+    
+    if (hasDockerPlugin) {
+      // Fall back to docker compose (Docker Compose plugin)
+      if (hasDockerCompose) {
+        console.log('  docker-compose failed, trying docker compose...');
+      }
+      const proc2 = Bun.spawn(['docker', 'compose', 'up', '-d', 'mock-server', 'litellm', 'apimap'], {
+        env,
+        stdout: 'inherit',
+        stderr: 'inherit',
+      });
+      return await proc2.exited;
+    }
+    
+    console.error('  ❌ Neither docker-compose nor docker compose found');
+    return 1;
+  }
+  
+  private async commandExists(cmd: string): Promise<boolean> {
+    try {
+      const proc = Bun.spawn(['which', cmd], { stdout: 'pipe', stderr: 'pipe' });
+      const exitCode = await proc.exited;
+      return exitCode === 0;
+    } catch {
+      return false;
+    }
   }
 
   private async waitForServices(): Promise<void> {
@@ -287,25 +310,32 @@ class DockerComposeManager {
     }
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     if (!this.isRunning) return;
     
     console.log('\n🛑 Stopping services...');
     
-    // Try docker-compose first, then docker compose
-    let proc = Bun.spawnSync(['docker-compose', 'down', '-v'], {
-      stdout: 'inherit',
-      stderr: 'pipe',
-    });
+    // Check which compose command to use
+    const hasDockerCompose = await this.commandExists('docker-compose');
+    let exitCode = 1;
     
-    if (proc.exitCode !== 0) {
-      proc = Bun.spawnSync(['docker', 'compose', 'down', '-v'], {
+    if (hasDockerCompose) {
+      const proc = Bun.spawnSync(['docker-compose', 'down', '-v'], {
+        stdout: 'inherit',
+        stderr: 'pipe',
+      });
+      exitCode = proc.exitCode ?? 1;
+    }
+    
+    if (exitCode !== 0 && await this.commandExists('docker')) {
+      const proc = Bun.spawnSync(['docker', 'compose', 'down', '-v'], {
         stdout: 'inherit',
         stderr: 'inherit',
       });
+      exitCode = proc.exitCode ?? 1;
     }
     
-    if (proc.exitCode === 0) {
+    if (exitCode === 0) {
       console.log('  ✅ Services stopped');
     } else {
       console.log('  ⚠️  Some services may still be running');
@@ -1376,13 +1406,13 @@ async function main() {
   
   // Ensure services are stopped on exit (unless --keep-services)
   if (!keepServices) {
-    process.on('SIGINT', () => {
+    process.on('SIGINT', async () => {
       console.log('\n\nInterrupted by user, stopping services...');
-      dockerManager.stop();
+      await dockerManager.stop();
       process.exit(130);
     });
-    process.on('SIGTERM', () => {
-      dockerManager.stop();
+    process.on('SIGTERM', async () => {
+      await dockerManager.stop();
     });
   }
 
@@ -1497,7 +1527,7 @@ async function main() {
   } finally {
     // Always stop services (unless --keep-services)
     if (!keepServices) {
-      dockerManager.stop();
+      await dockerManager.stop();
     } else {
       console.log('\n🔌 Services left running (use --keep-services to stop them manually)');
     }
