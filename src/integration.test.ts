@@ -249,7 +249,7 @@ describe("Integration Tests", () => {
       // The responses API uses input field but our transformer handles it as openai-chat
       const responsesReq = {
         model: "gpt-4o",
-        messages: [{ role: "user", content: "Hello" }],
+        input: [{ role: "user", content: "Hello" }],
         temperature: 0.7,
       };
 

@@ -554,8 +554,12 @@ export function parseOpenAICompletionRequest(
  * Convert Responses API input items to internal messages
  */
 function responsesInputToInternalMessages(
-  input: string | OpenAIResponsesInputItem[]
+  input: string | OpenAIResponsesInputItem[] | undefined
 ): InternalMessage[] {
+  if (!input) {
+    return [];
+  }
+  
   if (typeof input === "string") {
     return [{ role: "user", content: input }];
   }
