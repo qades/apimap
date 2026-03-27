@@ -544,6 +544,44 @@ const TIER3_PROVIDERS: Record<string, ProviderInfo> = {
     requiresApiKey: true,
     category: "cloud",
   },
+  // ---- Developer Tools & IDE Integrations ----
+  v0: {
+    id: "v0",
+    name: "v0 (Vercel)",
+    description: "Vercel v0 - AI-assisted UI generation",
+    defaultBaseUrl: "https://api.v0.dev/v1",
+    defaultApiKeyEnv: "V0_API_KEY",
+    authHeader: "Authorization",
+    authPrefix: "Bearer ",
+    supportsStreaming: true,
+    requiresApiKey: true,
+    category: "cloud",
+  },
+  github_copilot: {
+    id: "github_copilot",
+    name: "GitHub Copilot",
+    description: "GitHub Copilot Chat API - requires Copilot subscription",
+    defaultBaseUrl: "https://api.githubcopilot.com",
+    defaultApiKeyEnv: "GITHUB_COPILOT_API_KEY",
+    authHeader: "Authorization",
+    authPrefix: "Bearer ",
+    supportsStreaming: true,
+    requiresApiKey: true,
+    category: "cloud",
+  },
+  // ---- HuggingFace Endpoints ----
+  huggingface_endpoints: {
+    id: "huggingface_endpoints",
+    name: "HuggingFace Inference Endpoints",
+    description: "HuggingFace dedicated inference endpoints",
+    defaultBaseUrl: "https://api.endpoints.huggingface.cloud/v2",
+    defaultApiKeyEnv: "HF_ENDPOINTS_API_KEY",
+    authHeader: "Authorization",
+    authPrefix: "Bearer ",
+    supportsStreaming: true,
+    requiresApiKey: true,
+    category: "cloud",
+  },
 };
 
 // ============================================================================
@@ -772,6 +810,20 @@ const TIER4_ENTERPRISE_PROVIDERS: Record<string, ProviderInfo> = {
     description: "Predibase - LoRA serving and fine-tuning",
     defaultBaseUrl: "https://api.predibase.com/v1",
     defaultApiKeyEnv: "PREDIBASE_API_KEY",
+    authHeader: "Authorization",
+    authPrefix: "Bearer ",
+    supportsStreaming: true,
+    requiresApiKey: true,
+    category: "enterprise",
+  },
+  // ---- Note: Heroku requires custom base URL ----
+  // Format: https://{app-name}.herokuapp.com/v1
+  heroku: {
+    id: "heroku",
+    name: "Heroku",
+    description: "Heroku - dyno-based inference (requires custom app URL)",
+    defaultBaseUrl: "https://your-app.herokuapp.com/v1",
+    defaultApiKeyEnv: "HEROKU_API_KEY",
     authHeader: "Authorization",
     authPrefix: "Bearer ",
     supportsStreaming: true,
