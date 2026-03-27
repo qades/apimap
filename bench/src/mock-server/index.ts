@@ -1,9 +1,15 @@
 #!/usr/bin/env bun
 /**
- * Mock LLM Server - Bun Implementation
+ * Multi-Provider Mock LLM Server
  * 
- * Simulates LLM API responses with configurable latency and behavior.
- * Includes comprehensive error logging for debugging.
+ * Supports OpenAI, Anthropic, Gemini, DeepSeek, vLLM, Ollama, and generic OpenAI-compatible endpoints.
+ * Validates requests according to each provider's schema.
+ * 
+ * All endpoints are always enabled - the server handles all API formats simultaneously
+ * so clients can use whatever endpoint their programs expect.
+ * 
+ * Environment Variables:
+ *   MOCK_STRICT_VALIDATION=true  - Throw errors on malformed requests (default: true)
  */
 
 import { Elysia, t } from 'elysia';
@@ -26,6 +32,7 @@ interface Config {
   logDir: string;
   logRequests: boolean;
   logErrors: boolean;
+  strictValidation: boolean;
 }
 
 const config: Config = {
@@ -40,16 +47,18 @@ const config: Config = {
   logDir: Bun.env.MOCK_LOG_DIR || './logs',
   logRequests: Bun.env.MOCK_LOG_REQUESTS !== 'false',
   logErrors: Bun.env.MOCK_LOG_ERRORS !== 'false',
+  strictValidation: Bun.env.MOCK_STRICT_VALIDATION !== 'false',
 };
 
 // ============================================================================
-// Error Logger
+// Types
 // ============================================================================
 
 interface RequestLog {
   timestamp: string;
   method: string;
   path: string;
+  provider: string;
   requestId: string;
   durationMs: number;
   statusCode: number;
@@ -64,10 +73,21 @@ interface ErrorLog {
   requestId: string;
   method: string;
   path: string;
+  provider: string;
   error: string;
   stack?: string;
   context?: Record<string, unknown>;
 }
+
+interface ValidationError {
+  field: string;
+  message: string;
+  value?: unknown;
+}
+
+// ============================================================================
+// Logger
+// ============================================================================
 
 class RequestLogger {
   private requests: RequestLog[] = [];
@@ -94,29 +114,27 @@ class RequestLogger {
   logError(log: ErrorLog): void {
     if (!this.errorEnabled) return;
     this.errors.push(log);
-    
-    // Also log to console for immediate visibility
-    console.error(`[${log.timestamp}] ERROR ${log.method} ${log.path}: ${log.error}`);
+    console.error(`[${log.timestamp}] ERROR ${log.provider} ${log.method} ${log.path}: ${log.error}`);
   }
 
   saveLogs(): void {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     
-    // Save request log
     if (this.enabled && this.requests.length > 0) {
       const requestPath = join(this.logDir, `mock_requests_${timestamp}.json`);
+      const stats = this.getStats();
       const requestData = {
         timestamp: new Date().toISOString(),
-        totalRequests: this.requests.length,
-        errors: this.requests.filter(r => r.statusCode >= 400).length,
-        avgDurationMs: this.requests.reduce((a, b) => a + b.durationMs, 0) / this.requests.length,
+        totalRequests: stats.total,
+        errors: stats.errors,
+        avgDurationMs: stats.avgDuration,
+        byProvider: stats.byProvider,
         requests: this.requests,
       };
       writeFileSync(requestPath, JSON.stringify(requestData, null, 2));
       console.log(`📄 Request log saved to: ${requestPath}`);
     }
     
-    // Save error log
     if (this.errorEnabled && this.errors.length > 0) {
       const errorPath = join(this.logDir, `mock_errors_${timestamp}.json`);
       const errorData = {
@@ -129,22 +147,39 @@ class RequestLogger {
     }
   }
 
-  getStats(): { total: number; errors: number; avgDuration: number } {
+  getStats(): { 
+    total: number; 
+    errors: number; 
+    avgDuration: number;
+    byProvider: Record<string, { total: number; errors: number }>;
+  } {
     if (this.requests.length === 0) {
-      return { total: 0, errors: 0, avgDuration: 0 };
+      return { total: 0, errors: 0, avgDuration: 0, byProvider: {} };
     }
+    
+    const byProvider: Record<string, { total: number; errors: number }> = {};
+    
+    for (const req of this.requests) {
+      if (!byProvider[req.provider]) {
+        byProvider[req.provider] = { total: 0, errors: 0 };
+      }
+      byProvider[req.provider].total++;
+      if (req.statusCode >= 400) {
+        byProvider[req.provider].errors++;
+      }
+    }
+    
     return {
       total: this.requests.length,
       errors: this.requests.filter(r => r.statusCode >= 400).length,
       avgDuration: this.requests.reduce((a, b) => a + b.durationMs, 0) / this.requests.length,
+      byProvider,
     };
   }
 }
 
-// Create global logger instance
 const requestLogger = new RequestLogger(config.logDir, config.logRequests, config.logErrors);
 
-// Save logs on graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n\nShutting down gracefully...');
   requestLogger.saveLogs();
@@ -179,32 +214,28 @@ function generateRequestId(): string {
   return `req-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 }
 
-// Sample responses for variety
-const sampleResponses = [
-  "This is a mock response from the LLM server.",
-  "I understand your request and here's my response.",
-  "Processing your input with simulated AI capabilities.",
-  "Mock LLM output for benchmarking purposes.",
-  "Here's a brief response to your query.",
-  "Simulated natural language processing complete.",
-];
-
-// ============================================================================
-// Request Handlers
-// ============================================================================
-
-interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
+function countTokens(text: string): number {
+  return Math.ceil(text.length / 4);
 }
 
-interface ChatCompletionRequest {
-  model: string;
-  messages: ChatMessage[];
-  stream?: boolean;
-  max_tokens?: number;
-  temperature?: number;
-  top_p?: number;
+function countMessageTokens(messages: Array<{ role: string; content: unknown }>): number {
+  let total = 0;
+  for (const msg of messages) {
+    if (typeof msg.content === 'string') {
+      total += countTokens(msg.content);
+    } else if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (typeof block === 'object' && block !== null) {
+          if ('text' in block && typeof block.text === 'string') {
+            total += countTokens(block.text);
+          } else if ('content' in block && typeof block.content === 'string') {
+            total += countTokens(block.content);
+          }
+        }
+      }
+    }
+  }
+  return total;
 }
 
 function calculateLatency(inputTokens: number, outputTokens: number): number {
@@ -214,7 +245,6 @@ function calculateLatency(inputTokens: number, outputTokens: number): number {
   
   const inputLatency = (inputTokens / 1000) * 1000;
   const outputLatency = (outputTokens / config.tokensPerSecond) * 1000;
-  
   const baseLatency = config.latencyMeanMs > 0 
     ? Math.max(0, gaussianRandom(config.latencyMeanMs, config.latencyStdMs))
     : 0;
@@ -226,14 +256,933 @@ function shouldError(): boolean {
   return Math.random() < config.errorRate;
 }
 
-function countTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+// ============================================================================
+// Validation Functions
+// ============================================================================
+
+class ValidationResult {
+  errors: ValidationError[] = [];
+  
+  addError(field: string, message: string, value?: unknown): void {
+    this.errors.push({ field, message, value });
+  }
+  
+  isValid(): boolean {
+    return this.errors.length === 0;
+  }
+  
+  toResponse() {
+    return {
+      error: 'Validation failed',
+      details: this.errors,
+    };
+  }
 }
 
-function validateContextLength(messages: ChatMessage[]): { valid: boolean; tokens: number } {
-  const totalText = messages.map(m => m.content).join('');
-  const tokens = countTokens(totalText);
-  return { valid: tokens <= config.maxContextLength, tokens };
+function validateOpenAIRequest(body: Record<string, unknown>): ValidationResult {
+  const result = new ValidationResult();
+  
+  if (!body.model) {
+    result.addError('model', 'model is required');
+  } else if (typeof body.model !== 'string') {
+    result.addError('model', 'model must be a string', body.model);
+  }
+  
+  if (!body.messages) {
+    result.addError('messages', 'messages is required');
+  } else if (!Array.isArray(body.messages)) {
+    result.addError('messages', 'messages must be an array', body.messages);
+  } else {
+    for (let i = 0; i < body.messages.length; i++) {
+      const msg = body.messages[i] as Record<string, unknown>;
+      if (!msg.role) {
+        result.addError(`messages[${i}].role`, 'role is required');
+      } else if (!['system', 'user', 'assistant', 'tool'].includes(msg.role as string)) {
+        result.addError(`messages[${i}].role`, 'role must be system, user, assistant, or tool', msg.role);
+      }
+      
+      if (!msg.content && msg.role !== 'assistant') {
+        result.addError(`messages[${i}].content`, 'content is required for non-assistant messages');
+      }
+    }
+  }
+  
+  if (body.temperature !== undefined) {
+    const temp = Number(body.temperature);
+    if (isNaN(temp) || temp < 0 || temp > 2) {
+      result.addError('temperature', 'temperature must be between 0 and 2', body.temperature);
+    }
+  }
+  
+  if (body.top_p !== undefined) {
+    const topP = Number(body.top_p);
+    if (isNaN(topP) || topP < 0 || topP > 1) {
+      result.addError('top_p', 'top_p must be between 0 and 1', body.top_p);
+    }
+  }
+  
+  if (body.max_tokens !== undefined) {
+    const maxTokens = Number(body.max_tokens);
+    if (isNaN(maxTokens) || maxTokens < 1) {
+      result.addError('max_tokens', 'max_tokens must be a positive integer', body.max_tokens);
+    }
+  }
+  
+  if (body.n !== undefined) {
+    const n = Number(body.n);
+    if (isNaN(n) || n < 1 || n > 128) {
+      result.addError('n', 'n must be between 1 and 128', body.n);
+    }
+  }
+  
+  if (body.seed !== undefined) {
+    const seed = Number(body.seed);
+    if (isNaN(seed)) {
+      result.addError('seed', 'seed must be an integer', body.seed);
+    }
+  }
+  
+  if (body.presence_penalty !== undefined) {
+    const penalty = Number(body.presence_penalty);
+    if (isNaN(penalty) || penalty < -2 || penalty > 2) {
+      result.addError('presence_penalty', 'presence_penalty must be between -2 and 2', body.presence_penalty);
+    }
+  }
+  
+  if (body.frequency_penalty !== undefined) {
+    const penalty = Number(body.frequency_penalty);
+    if (isNaN(penalty) || penalty < -2 || penalty > 2) {
+      result.addError('frequency_penalty', 'frequency_penalty must be between -2 and 2', body.frequency_penalty);
+    }
+  }
+  
+  if (body.logprobs !== undefined && typeof body.logprobs !== 'boolean') {
+    result.addError('logprobs', 'logprobs must be a boolean', body.logprobs);
+  }
+  
+  if (body.top_logprobs !== undefined) {
+    const topLogprobs = Number(body.top_logprobs);
+    if (isNaN(topLogprobs) || topLogprobs < 0 || topLogprobs > 20) {
+      result.addError('top_logprobs', 'top_logprobs must be between 0 and 20', body.top_logprobs);
+    }
+  }
+  
+  return result;
+}
+
+function validateAnthropicRequest(body: Record<string, unknown>): ValidationResult {
+  const result = new ValidationResult();
+  
+  if (!body.model) {
+    result.addError('model', 'model is required');
+  }
+  
+  if (!body.messages) {
+    result.addError('messages', 'messages is required');
+  } else if (!Array.isArray(body.messages)) {
+    result.addError('messages', 'messages must be an array');
+  } else {
+    for (let i = 0; i < body.messages.length; i++) {
+      const msg = body.messages[i] as Record<string, unknown>;
+      if (!msg.role) {
+        result.addError(`messages[${i}].role`, 'role is required');
+      } else if (!['user', 'assistant'].includes(msg.role as string)) {
+        result.addError(`messages[${i}].role`, 'role must be user or assistant', msg.role);
+      }
+    }
+  }
+  
+  if (!body.max_tokens) {
+    result.addError('max_tokens', 'max_tokens is required for Anthropic');
+  } else {
+    const maxTokens = Number(body.max_tokens);
+    if (isNaN(maxTokens) || maxTokens < 1) {
+      result.addError('max_tokens', 'max_tokens must be a positive integer', body.max_tokens);
+    }
+  }
+  
+  if (body.thinking) {
+    const thinking = body.thinking as Record<string, unknown>;
+    if (thinking.type !== 'enabled' && thinking.type !== 'disabled') {
+      result.addError('thinking.type', 'thinking.type must be enabled or disabled', thinking.type);
+    }
+    if (thinking.budget_tokens !== undefined) {
+      const budget = Number(thinking.budget_tokens);
+      if (isNaN(budget) || budget < 1) {
+        result.addError('thinking.budget_tokens', 'budget_tokens must be a positive integer', thinking.budget_tokens);
+      }
+    }
+  }
+  
+  return result;
+}
+
+function validateGeminiRequest(body: Record<string, unknown>): ValidationResult {
+  const result = new ValidationResult();
+  
+  if (!body.model) {
+    result.addError('model', 'model is required');
+  }
+  
+  if (!body.contents && !body.messages) {
+    result.addError('contents|messages', 'Either contents or messages is required');
+  }
+  
+  if (body.top_k !== undefined) {
+    const topK = Number(body.top_k);
+    if (isNaN(topK) || topK < 1) {
+      result.addError('top_k', 'top_k must be a positive integer', body.top_k);
+    }
+  }
+  
+  return result;
+}
+
+function validateDeepSeekRequest(body: Record<string, unknown>): ValidationResult {
+  const result = validateOpenAIRequest(body);
+  
+  if (body.thinking) {
+    const thinking = body.thinking as Record<string, unknown>;
+    if (thinking.type !== 'enabled' && thinking.type !== 'disabled') {
+      result.addError('thinking.type', 'thinking.type must be enabled or disabled', thinking.type);
+    }
+  }
+  
+  if (body.chat_template_kwargs) {
+    const kwargs = body.chat_template_kwargs as Record<string, unknown>;
+    if (kwargs.enable_thinking !== undefined && typeof kwargs.enable_thinking !== 'boolean') {
+      result.addError('chat_template_kwargs.enable_thinking', 'enable_thinking must be a boolean', kwargs.enable_thinking);
+    }
+  }
+  
+  return result;
+}
+
+function validateGenericRequest(body: Record<string, unknown>): ValidationResult {
+  const result = new ValidationResult();
+  
+  if (!body.model) {
+    result.addError('model', 'model is required');
+  }
+  
+  if (!body.messages && !body.prompt && !body.input) {
+    result.addError('messages|prompt|input', 'One of messages, prompt, or input is required');
+  }
+  
+  return result;
+}
+
+// ============================================================================
+// Sample Responses
+// ============================================================================
+
+const sampleResponses = {
+  openai: [
+    "This is a mock response from the OpenAI-compatible endpoint.",
+    "Processing your request with simulated OpenAI capabilities.",
+    "Mock LLM output for OpenAI-style benchmarking.",
+  ],
+  anthropic: [
+    "This is a mock response from the Anthropic endpoint.",
+    "Processing your request with simulated Claude capabilities.",
+    "Mock LLM output for Anthropic-style benchmarking.",
+  ],
+  gemini: [
+    "This is a mock response from the Gemini endpoint.",
+    "Processing your request with simulated Gemini capabilities.",
+    "Mock LLM output for Gemini-style benchmarking.",
+  ],
+  deepseek: [
+    "This is a mock response from the DeepSeek endpoint.",
+    "Processing with simulated DeepSeek R1 capabilities.",
+    "Mock LLM output for DeepSeek-style benchmarking.",
+  ],
+  vllm: [
+    "This is a mock response from the vLLM endpoint.",
+    "Processing with simulated vLLM capabilities.",
+    "Mock LLM output for vLLM benchmarking.",
+  ],
+  ollama: [
+    "This is a mock response from the Ollama endpoint.",
+    "Processing with simulated local model capabilities.",
+    "Mock LLM output for Ollama benchmarking.",
+  ],
+  generic: [
+    "This is a generic mock response.",
+    "Processing your request.",
+    "Mock LLM output for generic benchmarking.",
+  ],
+};
+
+// ============================================================================
+// Response Generators
+// ============================================================================
+
+function generateOpenAIResponse(
+  model: string, 
+  messages: Array<{ role: string; content: unknown }>, 
+  maxTokens: number,
+  includeLogprobs: boolean = false,
+  seed?: number
+): {
+  id: string;
+  object: string;
+  created: number;
+  model: string;
+  choices: Array<{
+    index: number;
+    message: { role: string; content: string };
+    finish_reason: string;
+    logprobs?: unknown;
+  }>;
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  system_fingerprint?: string;
+} {
+  const responses = sampleResponses.openai;
+  const responseText = responses[Math.floor(Math.random() * responses.length)];
+  const truncatedResponse = responseText.split(' ').slice(0, maxTokens).join(' ');
+  const inputTokens = countMessageTokens(messages);
+  const outputTokens = countTokens(truncatedResponse);
+  
+  const choice: {
+    index: number;
+    message: { role: string; content: string };
+    finish_reason: string;
+    logprobs?: unknown;
+  } = {
+    index: 0,
+    message: { role: 'assistant', content: truncatedResponse },
+    finish_reason: 'stop',
+  };
+  
+  if (includeLogprobs) {
+    choice.logprobs = {
+      content: truncatedResponse.split(' ').map((token) => ({
+        token,
+        logprob: -0.5 - Math.random(),
+        bytes: Array.from(new TextEncoder().encode(token)),
+      })),
+    };
+  }
+  
+  const result: {
+    id: string;
+    object: string;
+    created: number;
+    model: string;
+    choices: Array<typeof choice>;
+    usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+    system_fingerprint?: string;
+  } = {
+    id: generateId(),
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [choice],
+    usage: {
+      prompt_tokens: inputTokens,
+      completion_tokens: outputTokens,
+      total_tokens: inputTokens + outputTokens,
+    },
+  };
+  
+  if (seed !== undefined) {
+    result.system_fingerprint = `mock_fp_${seed}`;
+  }
+  
+  return result;
+}
+
+function generateAnthropicResponse(
+  model: string,
+  messages: Array<{ role: string; content: unknown }>,
+  maxTokens: number,
+  enableThinking?: boolean
+): {
+  id: string;
+  type: string;
+  role: string;
+  model: string;
+  content: Array<{ type: string; text?: string; thinking?: string; signature?: string }>;
+  stop_reason: string;
+  usage: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
+} {
+  const responses = sampleResponses.anthropic;
+  const responseText = responses[Math.floor(Math.random() * responses.length)];
+  const truncatedResponse = responseText.split(' ').slice(0, maxTokens).join(' ');
+  const inputTokens = countMessageTokens(messages);
+  const outputTokens = countTokens(truncatedResponse);
+  
+  const content: Array<{ type: string; text?: string; thinking?: string; signature?: string }> = [];
+  
+  if (enableThinking) {
+    content.push({
+      type: 'thinking',
+      thinking: 'This is simulated thinking content for Anthropic models.',
+      signature: 'mock_signature_' + generateId(),
+    });
+  }
+  
+  content.push({
+    type: 'text',
+    text: truncatedResponse,
+  });
+  
+  return {
+    id: generateId(),
+    type: 'message',
+    role: 'assistant',
+    model,
+    content,
+    stop_reason: 'end_turn',
+    usage: {
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+    },
+  };
+}
+
+function generateDeepSeekResponse(
+  model: string,
+  messages: Array<{ role: string; content: unknown }>,
+  maxTokens: number,
+  enableThinking?: boolean
+): {
+  id: string;
+  object: string;
+  created: number;
+  model: string;
+  choices: Array<{
+    index: number;
+    message: { role: string; content: string; reasoning_content?: string };
+    finish_reason: string;
+  }>;
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+} {
+  const responses = sampleResponses.deepseek;
+  const responseText = responses[Math.floor(Math.random() * responses.length)];
+  const truncatedResponse = responseText.split(' ').slice(0, maxTokens).join(' ');
+  const inputTokens = countMessageTokens(messages);
+  const outputTokens = countTokens(truncatedResponse);
+  
+  const message: { role: string; content: string; reasoning_content?: string } = {
+    role: 'assistant',
+    content: truncatedResponse,
+  };
+  
+  if (enableThinking) {
+    message.reasoning_content = 'This is simulated reasoning content from DeepSeek R1.';
+  }
+  
+  return {
+    id: generateId(),
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [{
+      index: 0,
+      message,
+      finish_reason: 'stop',
+    }],
+    usage: {
+      prompt_tokens: inputTokens,
+      completion_tokens: outputTokens,
+      total_tokens: inputTokens + outputTokens,
+    },
+  };
+}
+
+// ============================================================================
+// Streaming Generators
+// ============================================================================
+
+async function* openAIStreamGenerator(
+  model: string,
+  messages: Array<{ role: string; content: unknown }>,
+  maxTokens: number,
+  includeLogprobs: boolean = false,
+  includeReasoning: boolean = false
+): AsyncGenerator<string> {
+  const responses = sampleResponses.openai;
+  const responseText = responses[Math.floor(Math.random() * responses.length)];
+  const truncatedResponse = responseText.split(' ').slice(0, maxTokens).join(' ');
+  const words = truncatedResponse.split(' ');
+  const responseId = generateId();
+  const timestamp = Math.floor(Date.now() / 1000);
+  
+  yield `data: ${JSON.stringify({
+    id: responseId,
+    object: 'chat.completion.chunk',
+    created: timestamp,
+    model,
+    choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
+  })}\n\n`;
+  
+  if (includeReasoning) {
+    yield `data: ${JSON.stringify({
+      id: generateId(),
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model,
+      choices: [{ index: 0, delta: { reasoning_content: 'Simulated reasoning...' }, finish_reason: null }],
+    })}\n\n`;
+    await sleep(100);
+  }
+  
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const prefix = i > 0 ? ' ' : '';
+    const chunk: Record<string, unknown> = {
+      id: generateId(),
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model,
+      choices: [{
+        index: 0,
+        delta: { content: prefix + word },
+        finish_reason: null,
+      }],
+    };
+    
+    if (includeLogprobs) {
+      chunk.choices[0].logprobs = {
+        content: [{
+          token: word,
+          logprob: -0.5 - Math.random(),
+          bytes: Array.from(new TextEncoder().encode(word)),
+        }],
+      };
+    }
+    
+    yield `data: ${JSON.stringify(chunk)}\n\n`;
+    await sleep((1 / config.tokensPerSecond) * 1000);
+  }
+  
+  yield `data: ${JSON.stringify({
+    id: generateId(),
+    object: 'chat.completion.chunk',
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+  })}\n\n`;
+  
+  yield 'data: [DONE]\n\n';
+}
+
+async function* anthropicStreamGenerator(
+  model: string,
+  messages: Array<{ role: string; content: unknown }>,
+  maxTokens: number,
+  enableThinking?: boolean
+): AsyncGenerator<string> {
+  const responses = sampleResponses.anthropic;
+  const responseText = responses[Math.floor(Math.random() * responses.length)];
+  const truncatedResponse = responseText.split(' ').slice(0, maxTokens).join(' ');
+  const words = truncatedResponse.split(' ');
+  const responseId = generateId();
+  
+  yield `data: ${JSON.stringify({
+    type: 'message_start',
+    message: {
+      id: responseId,
+      type: 'message',
+      role: 'assistant',
+      model,
+      content: [],
+    },
+  })}\n\n`;
+  
+  if (enableThinking) {
+    yield `data: ${JSON.stringify({
+      type: 'content_block_start',
+      index: 0,
+      content_block: { type: 'thinking', thinking: '' },
+    })}\n\n`;
+    
+    yield `data: ${JSON.stringify({
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'thinking_delta', thinking: 'Simulated thinking...' },
+    })}\n\n`;
+    
+    yield `data: ${JSON.stringify({
+      type: 'content_block_stop',
+      index: 0,
+    })}\n\n`;
+  }
+  
+  yield `data: ${JSON.stringify({
+    type: 'content_block_start',
+    index: enableThinking ? 1 : 0,
+    content_block: { type: 'text', text: '' },
+  })}\n\n`;
+  
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const prefix = i > 0 ? ' ' : '';
+    
+    yield `data: ${JSON.stringify({
+      type: 'content_block_delta',
+      index: enableThinking ? 1 : 0,
+      delta: { type: 'text_delta', text: prefix + word },
+    })}\n\n`;
+    
+    await sleep((1 / config.tokensPerSecond) * 1000);
+  }
+  
+  yield `data: ${JSON.stringify({
+    type: 'content_block_stop',
+    index: enableThinking ? 1 : 0,
+  })}\n\n`;
+  
+  yield `data: ${JSON.stringify({
+    type: 'message_delta',
+    delta: { stop_reason: 'end_turn', stop_sequence: null },
+    usage: { output_tokens: countTokens(truncatedResponse) },
+  })}\n\n`;
+  
+  yield `data: ${JSON.stringify({ type: 'message_stop' })}\n\n`;
+}
+
+// ============================================================================
+// Route Handlers
+// ============================================================================
+
+async function handleOpenAIRequest(
+  body: Record<string, unknown>,
+  request: Request,
+  startTime: number
+): Promise<Response> {
+  const requestId = generateRequestId();
+  const provider = 'openai';
+  
+  try {
+    if (config.strictValidation) {
+      const validation = validateOpenAIRequest(body);
+      if (!validation.isValid()) {
+        requestLogger.logError({
+          timestamp: new Date().toISOString(),
+          requestId,
+          method: 'POST',
+          path: '/v1/chat/completions',
+          provider,
+          error: 'Validation failed',
+          context: { errors: validation.errors },
+        });
+        
+        requestLogger.logRequest({
+          timestamp: new Date().toISOString(),
+          method: 'POST',
+          path: '/v1/chat/completions',
+          provider,
+          requestId,
+          durationMs: performance.now() - startTime,
+          statusCode: 400,
+          error: 'Validation failed',
+        });
+        
+        return new Response(JSON.stringify(validation.toResponse()), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json', 'X-Request-Id': requestId },
+        });
+      }
+    }
+    
+    if (shouldError()) {
+      const error = 'Simulated LLM error';
+      requestLogger.logError({
+        timestamp: new Date().toISOString(),
+        requestId,
+        method: 'POST',
+        path: '/v1/chat/completions',
+        provider,
+        error,
+        context: { model: body.model, simulated: true },
+      });
+      
+      requestLogger.logRequest({
+        timestamp: new Date().toISOString(),
+        method: 'POST',
+        path: '/v1/chat/completions',
+        provider,
+        requestId,
+        durationMs: performance.now() - startTime,
+        statusCode: 500,
+        error,
+      });
+      
+      return new Response(JSON.stringify({ error, requestId }), {
+        status: 500,
+        headers: { 'X-Request-Id': requestId },
+      });
+    }
+    
+    const messages = body.messages as Array<{ role: string; content: unknown }>;
+    const maxTokens = Number(body.max_tokens) || 50;
+    const stream = body.stream === true;
+    const logprobs = body.logprobs === true;
+    const seed = body.seed !== undefined ? Number(body.seed) : undefined;
+    
+    const inputTokens = countMessageTokens(messages);
+    const latency = calculateLatency(inputTokens, maxTokens);
+    await sleep(latency);
+    
+    if (stream && config.streamingEnabled) {
+      const generator = openAIStreamGenerator(
+        body.model as string,
+        messages,
+        maxTokens,
+        logprobs,
+        body.reasoning_content !== undefined
+      );
+      
+      requestLogger.logRequest({
+        timestamp: new Date().toISOString(),
+        method: 'POST',
+        path: '/v1/chat/completions',
+        provider,
+        requestId,
+        durationMs: performance.now() - startTime,
+        statusCode: 200,
+        inputTokens,
+      });
+      
+      const stream = new ReadableStream({
+        async pull(controller) {
+          const result = await generator.next();
+          if (result.done) {
+            controller.close();
+          } else {
+            controller.enqueue(new TextEncoder().encode(result.value));
+          }
+        },
+      });
+      
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'X-Request-Id': requestId,
+        },
+      });
+    }
+    
+    const response = generateOpenAIResponse(
+      body.model as string,
+      messages,
+      maxTokens,
+      logprobs,
+      seed
+    );
+    
+    requestLogger.logRequest({
+      timestamp: new Date().toISOString(),
+      method: 'POST',
+      path: '/v1/chat/completions',
+      provider,
+      requestId,
+      durationMs: performance.now() - startTime,
+      statusCode: 200,
+      inputTokens,
+      outputTokens: response.usage.completion_tokens,
+    });
+    
+    return new Response(JSON.stringify(response), {
+      headers: { 'Content-Type': 'application/json', 'X-Request-Id': requestId },
+    });
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    requestLogger.logError({
+      timestamp: new Date().toISOString(),
+      requestId,
+      method: 'POST',
+      path: '/v1/chat/completions',
+      provider,
+      error: errorMessage,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    throw error;
+  }
+}
+
+async function handleAnthropicRequest(
+  body: Record<string, unknown>,
+  request: Request,
+  startTime: number
+): Promise<Response> {
+  const requestId = generateRequestId();
+  const provider = 'anthropic';
+  
+  try {
+    if (config.strictValidation) {
+      const validation = validateAnthropicRequest(body);
+      if (!validation.isValid()) {
+        return new Response(JSON.stringify(validation.toResponse()), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json', 'X-Request-Id': requestId },
+        });
+      }
+    }
+    
+    if (shouldError()) {
+      return new Response(JSON.stringify({ 
+        error: 'Simulated Anthropic error',
+        type: 'api_error',
+        requestId 
+      }), {
+        status: 500,
+        headers: { 'X-Request-Id': requestId },
+      });
+    }
+    
+    const messages = body.messages as Array<{ role: string; content: unknown }>;
+    const maxTokens = Number(body.max_tokens) || 1024;
+    const stream = body.stream === true;
+    const thinking = body.thinking as { type?: string } | undefined;
+    const enableThinking = thinking?.type === 'enabled';
+    
+    const inputTokens = countMessageTokens(messages);
+    const latency = calculateLatency(inputTokens, maxTokens);
+    await sleep(latency);
+    
+    if (stream && config.streamingEnabled) {
+      const generator = anthropicStreamGenerator(
+        body.model as string,
+        messages,
+        maxTokens,
+        enableThinking
+      );
+      
+      const stream = new ReadableStream({
+        async pull(controller) {
+          const result = await generator.next();
+          if (result.done) {
+            controller.close();
+          } else {
+            controller.enqueue(new TextEncoder().encode(result.value));
+          }
+        },
+      });
+      
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'X-Request-Id': requestId,
+        },
+      });
+    }
+    
+    const response = generateAnthropicResponse(
+      body.model as string,
+      messages,
+      maxTokens,
+      enableThinking
+    );
+    
+    return new Response(JSON.stringify(response), {
+      headers: { 'Content-Type': 'application/json', 'X-Request-Id': requestId },
+    });
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    requestLogger.logError({
+      timestamp: new Date().toISOString(),
+      requestId,
+      method: 'POST',
+      path: '/v1/messages',
+      provider,
+      error: errorMessage,
+    });
+    throw error;
+  }
+}
+
+async function handleDeepSeekRequest(
+  body: Record<string, unknown>,
+  request: Request,
+  startTime: number
+): Promise<Response> {
+  const requestId = generateRequestId();
+  const provider = 'deepseek';
+  
+  try {
+    if (config.strictValidation) {
+      const validation = validateDeepSeekRequest(body);
+      if (!validation.isValid()) {
+        return new Response(JSON.stringify(validation.toResponse()), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json', 'X-Request-Id': requestId },
+        });
+      }
+    }
+    
+    if (shouldError()) {
+      return new Response(JSON.stringify({ 
+        error: 'Simulated DeepSeek error',
+        requestId 
+      }), { status: 500 });
+    }
+    
+    const messages = body.messages as Array<{ role: string; content: unknown }>;
+    const maxTokens = Number(body.max_tokens) || 50;
+    const stream = body.stream === true;
+    const chatTemplateKwargs = body.chat_template_kwargs as Record<string, unknown> | undefined;
+    const enableThinking = chatTemplateKwargs?.enable_thinking === true || 
+                          (body.thinking as Record<string, unknown>)?.type === 'enabled';
+    
+    await sleep(calculateLatency(countMessageTokens(messages), maxTokens));
+    
+    if (stream && config.streamingEnabled) {
+      const generator = openAIStreamGenerator(
+        body.model as string,
+        messages,
+        maxTokens,
+        false,
+        enableThinking
+      );
+      
+      const stream = new ReadableStream({
+        async pull(controller) {
+          const result = await generator.next();
+          if (result.done) controller.close();
+          else controller.enqueue(new TextEncoder().encode(result.value));
+        },
+      });
+      
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'X-Request-Id': requestId,
+        },
+      });
+    }
+    
+    const response = generateDeepSeekResponse(
+      body.model as string,
+      messages,
+      maxTokens,
+      enableThinking
+    );
+    
+    return new Response(JSON.stringify(response), {
+      headers: { 'Content-Type': 'application/json', 'X-Request-Id': requestId },
+    });
+    
+  } catch (error) {
+    requestLogger.logError({
+      timestamp: new Date().toISOString(),
+      requestId,
+      method: 'POST',
+      path: '/v1/chat/completions',
+      provider,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }
 
 // ============================================================================
@@ -250,6 +1199,7 @@ const app = new Elysia()
       requestId,
       method: request.method,
       path: new URL(request.url).pathname,
+      provider: 'unknown',
       error: errorMessage,
       stack: error instanceof Error ? error.stack : undefined,
     });
@@ -262,7 +1212,6 @@ const app = new Elysia()
     };
   })
 
-  // Request logging middleware
   .onBeforeHandle(({ request }) => {
     (request as Request & { _startTime?: number })._startTime = performance.now();
   })
@@ -271,17 +1220,13 @@ const app = new Elysia()
   .get('/health', () => ({ 
     status: 'healthy',
     timestamp: new Date().toISOString(),
-  }), {
-    detail: {
-      summary: 'Health check endpoint',
-      description: 'Returns the health status of the mock server',
-    },
-  })
+    strictValidation: config.strictValidation,
+  }))
 
   // Server info
   .get('/info', () => ({
-    name: 'Mock LLM Server (Bun)',
-    version: '1.0.0',
+    name: 'Multi-Provider Mock LLM Server',
+    version: '2.0.0',
     config: {
       latencyMeanMs: config.latencyMeanMs,
       latencyStdMs: config.latencyStdMs,
@@ -289,24 +1234,29 @@ const app = new Elysia()
       errorRate: config.errorRate,
       maxContextLength: config.maxContextLength,
       streamingEnabled: config.streamingEnabled,
-      logRequests: config.logRequests,
-      logErrors: config.logErrors,
+      strictValidation: config.strictValidation,
+    },
+    endpoints: {
+      openai: '/v1/chat/completions',
+      anthropic: '/v1/messages',
+      deepseek: '/deepseek/v1/chat/completions',
+      generic: '/generic/v1/chat/completions',
     },
     stats: requestLogger.getStats(),
   }))
 
-  // List models
+  // List models (OpenAI format)
   .get('/v1/models', ({ request }) => {
     const startTime = (request as Request & { _startTime?: number })._startTime || performance.now();
-    const duration = performance.now() - startTime;
     const requestId = generateRequestId();
     
     requestLogger.logRequest({
       timestamp: new Date().toISOString(),
       method: 'GET',
       path: '/v1/models',
+      provider: 'openai',
       requestId,
-      durationMs: duration,
+      durationMs: performance.now() - startTime,
       statusCode: 200,
     });
     
@@ -317,251 +1267,87 @@ const app = new Elysia()
         { id: 'gpt-4o', object: 'model', created: 1677610602, owned_by: 'openai' },
         { id: 'claude-3-haiku', object: 'model', created: 1677610602, owned_by: 'anthropic' },
         { id: 'claude-3-opus', object: 'model', created: 1677610602, owned_by: 'anthropic' },
+        { id: 'deepseek-chat', object: 'model', created: 1677610602, owned_by: 'deepseek' },
+        { id: 'deepseek-reasoner', object: 'model', created: 1677610602, owned_by: 'deepseek' },
       ],
     };
   })
 
-  // Chat completions
-  .post('/v1/chat/completions', async ({ body, set, request }) => {
+  // OpenAI-compatible endpoint
+  .post('/v1/chat/completions', async ({ body, request }) => {
     const startTime = (request as Request & { _startTime?: number })._startTime || performance.now();
-    const requestId = generateRequestId();
-    const req = body as ChatCompletionRequest;
-    
-    try {
-      // Simulate errors
-      if (shouldError()) {
-        const error = 'Simulated LLM error';
-        requestLogger.logError({
-          timestamp: new Date().toISOString(),
-          requestId,
-          method: 'POST',
-          path: '/v1/chat/completions',
-          error,
-          context: { model: req.model, simulated: true },
-        });
-        
-        set.status = 500;
-        requestLogger.logRequest({
-          timestamp: new Date().toISOString(),
-          method: 'POST',
-          path: '/v1/chat/completions',
-          requestId,
-          durationMs: performance.now() - startTime,
-          statusCode: 500,
-          error,
-        });
-        
-        return { error, requestId };
-      }
-
-      // Validate context length
-      const { valid, tokens } = validateContextLength(req.messages);
-      if (!valid) {
-        const error = 'Context length exceeded';
-        requestLogger.logError({
-          timestamp: new Date().toISOString(),
-          requestId,
-          method: 'POST',
-          path: '/v1/chat/completions',
-          error,
-          context: { 
-            model: req.model, 
-            contextTokens: tokens,
-            maxContext: config.maxContextLength,
-          },
-        });
-        
-        set.status = 400;
-        requestLogger.logRequest({
-          timestamp: new Date().toISOString(),
-          method: 'POST',
-          path: '/v1/chat/completions',
-          requestId,
-          durationMs: performance.now() - startTime,
-          statusCode: 400,
-          error,
-          inputTokens: tokens,
-        });
-        
-        return { 
-          error,
-          requestId,
-          context_tokens: tokens,
-          max_context: config.maxContextLength,
-        };
-      }
-
-      const responseText = sampleResponses[Math.floor(Math.random() * sampleResponses.length)];
-      const maxTokens = req.max_tokens || 50;
-      const truncatedResponse = responseText.split(' ').slice(0, maxTokens).join(' ');
-      const inputTokens = tokens;
-      const outputTokens = countTokens(truncatedResponse);
-      const latency = calculateLatency(inputTokens, outputTokens);
-
-      // Simulate processing time
-      await sleep(latency);
-
-      const responseId = generateId();
-      const timestamp = Math.floor(Date.now() / 1000);
-
-      // Handle streaming
-      if (req.stream && config.streamingEnabled) {
-        const words = truncatedResponse.split(' ');
-        
-        requestLogger.logRequest({
-          timestamp: new Date().toISOString(),
-          method: 'POST',
-          path: '/v1/chat/completions',
-          requestId,
-          durationMs: performance.now() - startTime,
-          statusCode: 200,
-          inputTokens,
-          outputTokens,
-        });
-        
-        const stream = new ReadableStream({
-          async start(controller) {
-            try {
-              // Send role first
-              const roleChunk = {
-                id: responseId,
-                object: 'chat.completion.chunk',
-                created: timestamp,
-                model: req.model,
-                choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
-              };
-              controller.enqueue(`data: ${JSON.stringify(roleChunk)}\n\n`);
-
-              // Stream tokens
-              const chunkSize = Math.floor(Math.random() * 3) + 1;
-              for (let i = 0; i < words.length; i += chunkSize) {
-                const chunkWords = words.slice(i, i + chunkSize);
-                const chunkText = (i > 0 ? ' ' : '') + chunkWords.join(' ');
-                
-                await sleep((chunkWords.length / config.tokensPerSecond) * 1000);
-
-                const contentChunk = {
-                  id: generateId(),
-                  object: 'chat.completion.chunk',
-                  created: Math.floor(Date.now() / 1000),
-                  model: req.model,
-                  choices: [{ index: 0, delta: { content: chunkText }, finish_reason: null }],
-                };
-                controller.enqueue(`data: ${JSON.stringify(contentChunk)}\n\n`);
-              }
-
-              // Send completion
-              const doneChunk = {
-                id: generateId(),
-                object: 'chat.completion.chunk',
-                created: Math.floor(Date.now() / 1000),
-                model: req.model,
-                choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-              };
-              controller.enqueue(`data: ${JSON.stringify(doneChunk)}\n\n`);
-              controller.enqueue('data: [DONE]\n\n');
-              controller.close();
-            } catch (error) {
-              const errorMessage = error instanceof Error ? error.message : String(error);
-              requestLogger.logError({
-                timestamp: new Date().toISOString(),
-                requestId,
-                method: 'POST',
-                path: '/v1/chat/completions (streaming)',
-                error: errorMessage,
-                stack: error instanceof Error ? error.stack : undefined,
-              });
-              controller.error(error);
-            }
-          },
-        });
-
-        return new Response(stream, {
-          headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'X-Request-Id': requestId,
-          },
-        });
-      }
-
-      // Non-streaming response
-      requestLogger.logRequest({
-        timestamp: new Date().toISOString(),
-        method: 'POST',
-        path: '/v1/chat/completions',
-        requestId,
-        durationMs: performance.now() - startTime,
-        statusCode: 200,
-        inputTokens,
-        outputTokens,
-      });
-
-      return {
-        id: responseId,
-        object: 'chat.completion',
-        created: timestamp,
-        model: req.model,
-        choices: [{
-          index: 0,
-          message: {
-            role: 'assistant',
-            content: truncatedResponse,
-          },
-          finish_reason: 'stop',
-        }],
-        usage: {
-          prompt_tokens: inputTokens,
-          completion_tokens: outputTokens,
-          total_tokens: inputTokens + outputTokens,
-        },
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      
-      requestLogger.logError({
-        timestamp: new Date().toISOString(),
-        requestId,
-        method: 'POST',
-        path: '/v1/chat/completions',
-        error: errorMessage,
-        stack: error instanceof Error ? error.stack : undefined,
-        context: { model: req.model },
-      });
-      
-      requestLogger.logRequest({
-        timestamp: new Date().toISOString(),
-        method: 'POST',
-        path: '/v1/chat/completions',
-        requestId,
-        durationMs: performance.now() - startTime,
-        statusCode: 500,
-        error: errorMessage,
-      });
-      
-      throw error;
-    }
+    return handleOpenAIRequest(body as Record<string, unknown>, request, startTime);
   }, {
     body: t.Object({
       model: t.String(),
-      messages: t.Array(t.Object({
-        role: t.Union([t.Literal('system'), t.Literal('user'), t.Literal('assistant')]),
-        content: t.String(),
-      })),
+      messages: t.Array(t.Record(t.String(), t.Unknown())),
       stream: t.Optional(t.Boolean()),
       max_tokens: t.Optional(t.Number()),
       temperature: t.Optional(t.Number()),
       top_p: t.Optional(t.Number()),
+      frequency_penalty: t.Optional(t.Number()),
+      presence_penalty: t.Optional(t.Number()),
+      seed: t.Optional(t.Number()),
+      n: t.Optional(t.Number()),
+      logprobs: t.Optional(t.Boolean()),
+      top_logprobs: t.Optional(t.Number()),
+      logit_bias: t.Optional(t.Record(t.String(), t.Number())),
+      user: t.Optional(t.String()),
+      extra_body: t.Optional(t.Record(t.String(), t.Unknown())),
+      extra_headers: t.Optional(t.Record(t.String(), t.String())),
+      extra_query: t.Optional(t.Record(t.String(), t.String())),
+      chat_template_kwargs: t.Optional(t.Record(t.String(), t.Unknown())),
     }),
+  })
+
+  // Anthropic endpoint
+  .post('/v1/messages', async ({ body, request }) => {
+    const startTime = (request as Request & { _startTime?: number })._startTime || performance.now();
+    return handleAnthropicRequest(body as Record<string, unknown>, request, startTime);
+  }, {
+    body: t.Object({
+      model: t.String(),
+      messages: t.Array(t.Record(t.String(), t.Unknown())),
+      max_tokens: t.Number(),
+      stream: t.Optional(t.Boolean()),
+      temperature: t.Optional(t.Number()),
+      top_p: t.Optional(t.Number()),
+      top_k: t.Optional(t.Number()),
+      stop_sequences: t.Optional(t.Array(t.String())),
+      system: t.Optional(t.Union([t.String(), t.Array(t.Record(t.String(), t.Unknown()))])),
+      thinking: t.Optional(t.Record(t.String(), t.Unknown())),
+      metadata: t.Optional(t.Record(t.String(), t.String())),
+    }),
+  })
+
+  // DeepSeek endpoint
+  .post('/deepseek/v1/chat/completions', async ({ body, request }) => {
+    const startTime = (request as Request & { _startTime?: number })._startTime || performance.now();
+    return handleDeepSeekRequest(body as Record<string, unknown>, request, startTime);
+  })
+
+  // Generic OpenAI-compatible (lenient validation)
+  .post('/generic/v1/chat/completions', async ({ body, request }) => {
+    const startTime = (request as Request & { _startTime?: number })._startTime || performance.now();
+    return handleOpenAIRequest(body as Record<string, unknown>, request, startTime);
   })
 
   // Root
   .get('/', () => ({
-    name: 'Mock LLM Server (Bun)',
-    version: '1.0.0',
-    endpoints: ['/health', '/info', '/v1/models', '/v1/chat/completions'],
-    documentation: '/docs',
+    name: 'Multi-Provider Mock LLM Server',
+    version: '2.0.0',
+    endpoints: {
+      health: '/health',
+      info: '/info',
+      models: '/v1/models',
+      openai: '/v1/chat/completions',
+      anthropic: '/v1/messages',
+      deepseek: '/deepseek/v1/chat/completions',
+      generic: '/generic/v1/chat/completions',
+    },
+    configuration: {
+      strictValidation: config.strictValidation,
+    },
   }));
 
 // ============================================================================
@@ -569,14 +1355,15 @@ const app = new Elysia()
 // ============================================================================
 
 console.log(`
-╔══════════════════════════════════════════════════════════════╗
-║           Mock LLM Server (Bun + Elysia)                    ║
-╚══════════════════════════════════════════════════════════════╝
+╔════════════════════════════════════════════════════════════════╗
+║           Multi-Provider Mock LLM Server                      ║
+╚════════════════════════════════════════════════════════════════╝
 `);
 
 console.log('Configuration:');
 console.log(`  Port: ${config.port}`);
 console.log(`  Host: ${config.host}`);
+console.log(`  Strict Validation: ${config.strictValidation ? 'enabled' : 'disabled'}`);
 console.log(`  Latency: ${config.latencyMeanMs}ms ± ${config.latencyStdMs}ms`);
 console.log(`  Tokens/sec: ${config.tokensPerSecond}`);
 console.log(`  Error rate: ${(config.errorRate * 100).toFixed(1)}%`);
@@ -595,6 +1382,14 @@ app.listen({
 console.log(`🚀 Server running at http://${config.host}:${config.port}`);
 console.log(`   Health: http://${config.host}:${config.port}/health`);
 console.log(`   Info: http://${config.host}:${config.port}/info`);
-console.log(`   Models: http://${config.host}:${config.port}/v1/models`);
+console.log('');
+console.log('All Endpoints Active:');
+console.log(`   OpenAI:     POST http://${config.host}:${config.port}/v1/chat/completions`);
+console.log(`   Anthropic:  POST http://${config.host}:${config.port}/v1/messages`);
+console.log(`   DeepSeek:   POST http://${config.host}:${config.port}/deepseek/v1/chat/completions`);
+console.log(`   Generic:    POST http://${config.host}:${config.port}/generic/v1/chat/completions`);
+console.log('');
+console.log('Environment Variables:');
+console.log(`  MOCK_STRICT_VALIDATION=true|false (current: ${config.strictValidation})`);
 console.log('');
 console.log('Press Ctrl+C to stop and save logs');

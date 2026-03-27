@@ -173,7 +173,14 @@ See `.env.example` for all available options.
 
 ### Mock Server Configuration
 
-The mock server simulates LLM responses for consistent testing:
+The mock server simulates LLM responses for consistent testing. **All provider endpoints are always active** - just like the API Map server itself:
+
+| Endpoint | Format | Always Available |
+|----------|--------|------------------|
+| `/v1/chat/completions` | OpenAI | ✓ Yes |
+| `/v1/messages` | Anthropic | ✓ Yes |
+| `/deepseek/v1/chat/completions` | DeepSeek | ✓ Yes |
+| `/generic/v1/chat/completions` | Generic OpenAI-compatible | ✓ Yes |
 
 ```bash
 # Custom mock server settings
@@ -190,7 +197,14 @@ services:
       - LATENCY_MEAN_MS=200
       - LATENCY_STD_MS=50
       - ERROR_RATE=0.05
+      - MOCK_STRICT_VALIDATION=true  # Validate requests (default: true)
 ```
+
+**Mock Server Features:**
+- **All endpoints always enabled** - No configuration needed
+- **Strict validation by default** - Returns 400 errors for malformed requests
+- **Provider-specific responses** - Simulates thinking/reasoning for Anthropic/DeepSeek
+- **Configurable behavior** - Latency, error rates, token speeds via environment variables
 
 ## 🏗️ Architecture
 

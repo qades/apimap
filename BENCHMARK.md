@@ -168,6 +168,24 @@ This ensures:
 - **CI mode**: Fresh image built from PR/branch source
 - **Release mode**: Can test published images
 
+### Mock Server Design
+
+The mock server is a **multi-provider LLM simulator** that exposes all major API formats simultaneously:
+
+```
+Mock Server Endpoints (Always Active)
+├── /v1/chat/completions    → OpenAI format
+├── /v1/messages            → Anthropic format  
+├── /deepseek/...           → DeepSeek format (with reasoning)
+└── /generic/...            → Generic OpenAI-compatible
+```
+
+**Design Principles:**
+- **All endpoints always enabled** - No configuration needed, just like API Map itself
+- **Strict validation by default** - Returns 400 errors for malformed requests (disable with `MOCK_STRICT_VALIDATION=false`)
+- **Provider-specific behavior** - Simulates thinking/reasoning blocks, logprobs, etc.
+- **Realistic latency simulation** - Configurable mean/std dev for testing performance
+
 ### Performance Optimization
 
 The benchmark suite is optimized for:

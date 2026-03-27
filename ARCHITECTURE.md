@@ -135,21 +135,30 @@ routes:
 - Expressive and flexible
 - Easy to understand
 
-### 3. Format Translation
+### 3. Format Translation (All Endpoints Always Active)
 
-The server speaks multiple API formats:
+The server **always exposes all API formats simultaneously**. Clients can use whatever endpoint their code expects:
 
-| Client Speaks | Provider Speaks | Translation |
-|--------------|-----------------|-------------|
-| OpenAI       | OpenAI          | Passthrough |
-| Anthropic    | Anthropic       | Passthrough |
-| OpenAI       | Anthropic       | Converted   |
-| Anthropic    | OpenAI          | Converted   |
+| Endpoint | Format | Always Available |
+|----------|--------|------------------|
+| `/v1/chat/completions` | OpenAI | ✓ Yes |
+| `/v1/messages` | Anthropic | ✓ Yes |
+| `/v1/models` | OpenAI/Anthropic | ✓ Yes |
+
+**Key Principle:** The server is a universal translator - it accepts requests in any supported format and routes them to the appropriate provider, converting as needed. There's no need to "enable" specific endpoints - they're all always there.
+
+| Client Sends | Provider Expects | What Happens |
+|--------------|------------------|--------------|
+| OpenAI format | OpenAI API | Passthrough |
+| OpenAI format | Anthropic API | OpenAI → Anthropic conversion |
+| Anthropic format | Anthropic API | Passthrough |
+| Anthropic format | OpenAI API | Anthropic → OpenAI conversion |
 
 **Benefits:**
-- Any client works with any provider
-- No client-side changes needed
-- Gradual migration path
+- Any client works with any provider (drop-in replacement)
+- No client-side changes needed - use the SDK/library you already have
+- No configuration needed to enable endpoints
+- Gradual migration path - mix and match client/provider formats
 
 ### 4. Auto-Save with Backups
 
