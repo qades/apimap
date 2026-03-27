@@ -1,196 +1,22 @@
 // ============================================================================
-// Core Type Definitions
+// API Types - External request/response formats
 // ============================================================================
 
-// Provider Configuration
-export interface ProviderConfig {
-  /** Base URL for the provider API */
-  baseUrl: string;
-  /** API key (optional, can use env var or request header) */
-  apiKey?: string;
-  /** Environment variable name for API key */
-  apiKeyEnv?: string;
-  /** Header name for API key (default: Authorization) */
-  authHeader?: string;
-  /** Auth header prefix (default: "Bearer ") */
-  authPrefix?: string;
-  /** Additional headers to send */
-  headers?: Record<string, string>;
-  /** Request timeout in seconds */
-  timeout?: number;
-  /** Whether this provider supports streaming */
-  supportsStreaming?: boolean;
-  /** Default transformer format for this provider (e.g., "openai-chat", "anthropic-messages") */
-  format?: string;
-}
-
-// Route Configuration
-export interface RouteConfig {
-  /** Pattern to match model names (supports wildcards: * and ?) */
-  pattern: string;
-  /** Provider to route to */
-  provider: string;
-  /** Model name to use upstream (defaults to original model name) */
-  model?: string;
-}
-
-// API Scheme Configuration
-export interface ApiSchemeConfig {
-  /** API scheme identifier (e.g., "openai-chat", "anthropic-messages") */
-  id: string;
-  /** Transformer format (e.g., "openai-chat", "openai-responses", "anthropic-messages") */
-  format: string;
-  /** Provider to use for this scheme (defaults to scheme id) */
-  defaultProvider?: string;
-}
-
-// Router Configuration
-export interface RouterConfig {
-  /** Server configuration */
-  server?: {
-    port?: number;                      // Port to listen on
-    host?: string;                      // Host to bind to (e.g., "0.0.0.0", "localhost")
-    externalPort?: number;              // External port for container mappings (e.g., Docker port forwarding)
-    cors?: {
-      origin?: string | string[];
-      credentials?: boolean;
-    };
-    timeout?: number;                   // Request timeout in seconds
-  };
-  /** Logging configuration */
-  logging?: {
-    dir?: string;
-    level?: "debug" | "info" | "warn" | "error";
-    maskKeys?: boolean;
-  };
-  /** Preload configuration */
-  preload?: {
-    enabled?: boolean;
-    models?: string[];
-  };
-  /** API schemes supported */
-  schemes?: ApiSchemeConfig[];
-  /** Provider configurations */
-  providers: Record<string, ProviderConfig>;
-  /** Routing rules (matched top-down, put catch-all "*" last) */
-  routes: RouteConfig[];
-}
-
-// ============================================================================
-// Request/Response Types - Anthropic
-// ============================================================================
-
-export interface AnthropicCacheControl {
-  type: "ephemeral";
-  ttl?: string;
-  scope?: string;
-}
-
-export interface AnthropicTextBlock {
-  type: "text";
-  text: string;
-  cache_control?: AnthropicCacheControl;
-}
-
-export interface AnthropicImageBlock {
-  type: "image";
-  source: unknown;
-  cache_control?: AnthropicCacheControl;
-}
-
-export interface AnthropicToolUseBlock {
-  type: "tool_use";
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
-  cache_control?: AnthropicCacheControl;
-}
-
-export interface AnthropicToolResultBlock {
-  type: "tool_result";
-  tool_use_id: string;
-  content: string | Array<AnthropicTextBlock | AnthropicImageBlock>;
-  is_error?: boolean;
-  cache_control?: AnthropicCacheControl;
-}
-
-export type AnthropicContentBlock = AnthropicTextBlock | AnthropicImageBlock | AnthropicToolUseBlock | AnthropicToolResultBlock;
-
-export interface AnthropicMessage {
-  role: "user" | "assistant";
-  content: string | AnthropicContentBlock[];
-}
-
-export interface AnthropicTool {
-  name: string;
-  description?: string;
-  input_schema: {
-    type: "object";
-    properties?: Record<string, unknown>;
-    required?: string[];
-    $schema?: string;
+/**
+ * OpenAI-style tool definition
+ */
+export interface OpenAITool {
+  type: "function";
+  function: {
+    name: string;
+    description?: string;
+    parameters: Record<string, unknown>;
   };
 }
 
-export type AnthropicToolChoice = "auto" | "any" | "tool" | { type: "tool"; name: string };
-
-export interface AnthropicOutputConfig {
-  format?: {
-    type: "text" | "json_schema";
-    schema?: Record<string, unknown>;
-  };
-  effort?: "low" | "medium" | "high";
-}
-
-export interface AnthropicRequest {
-  model: string;
-  messages: AnthropicMessage[];
-  max_tokens?: number;
-  temperature?: number;
-  top_p?: number;
-  stream?: boolean;
-  system?: string | AnthropicTextBlock[];
-  stop_sequences?: string[];
-  tools?: AnthropicTool[];
-  tool_choice?: AnthropicToolChoice;
-  metadata?: Record<string, unknown>;
-  output_config?: AnthropicOutputConfig;
-  thinking?: {
-    type: "enabled";
-    budget_tokens: number;
-  };
-}
-
-export interface AnthropicResponse {
-  id: string;
-  type: "message";
-  role: "assistant";
-  model: string;
-  content: AnthropicContentBlock[];
-  stop_reason: string | null;
-  stop_sequence: string | null;
-  usage: {
-    input_tokens: number;
-    output_tokens: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-  };
-}
-
-// ============================================================================
-// Request/Response Types - OpenAI
-// ============================================================================
-
-export interface OpenAIChatMessage {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string | null | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
-  name?: string;
-  tool_calls?: OpenAIToolCall[];
-  tool_call_id?: string;
-  /** Reasoning content from models like DeepSeek R1 */
-  reasoning_content?: string;
-}
-
+/**
+ * OpenAI-style tool call
+ */
 export interface OpenAIToolCall {
   id: string;
   type: "function";
@@ -200,48 +26,135 @@ export interface OpenAIToolCall {
   };
 }
 
-export interface OpenAIFunction {
-  name: string;
-  description?: string;
-  parameters: {
-    type: "object";
-    properties?: Record<string, unknown>;
-    required?: string[];
+/**
+ * OpenAI chat message content block
+ */
+export interface OpenAIContentBlock {
+  type: "text" | "image_url" | "input_audio" | "file";
+  text?: string;
+  image_url?: {
+    url: string;
+    detail?: "auto" | "low" | "high";
+  };
+  input_audio?: {
+    data: string;
+    format: "mp3" | "wav" | "ogg";
+  };
+  file?: {
+    file_data?: string;
+    filename?: string;
+    file_id?: string;
   };
 }
 
-export interface OpenAITool {
-  type: "function";
-  function: OpenAIFunction;
+/**
+ * OpenAI chat message
+ */
+export interface OpenAIChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null | OpenAIContentBlock[];
+  name?: string;
+  tool_calls?: OpenAIToolCall[];
+  tool_call_id?: string;
+  /** Reasoning content from models like DeepSeek R1 */
+  reasoning_content?: string;
+  /** Logprobs for this message */
+  logprobs?: {
+    content?: Array<{
+      token: string;
+      logprob: number;
+      bytes?: number[];
+      top_logprobs?: Array<{
+        token: string;
+        logprob: number;
+        bytes?: number[];
+      }>;
+    }>;
+  };
 }
 
+/**
+ * OpenAI response format
+ */
 export type OpenAIResponseFormat =
   | { type: "text" }
   | { type: "json_object" }
   | { type: "json_schema"; json_schema: { name: string; schema: Record<string, unknown>; strict?: boolean } };
 
+/**
+ * OpenAI chat completion request
+ * 
+ * Full implementation of the OpenAI Chat Completions API parameters.
+ * Reference: https://platform.openai.com/docs/api-reference/chat/create
+ */
 export interface OpenAIRequest {
+  // Required
   model: string;
   messages: OpenAIChatMessage[];
+  
+  // Core parameters
   max_tokens?: number;
   max_completion_tokens?: number;
   temperature?: number;
   top_p?: number;
   stream?: boolean;
-  stop?: string[];
+  stop?: string | string[] | null;
+  
+  // Tool parameters
   tools?: OpenAITool[];
   tool_choice?: "auto" | "required" | "none" | { type: "function"; function: { name: string } };
+  parallel_tool_calls?: boolean;
+  
+  // Response format
   response_format?: OpenAIResponseFormat;
+  modalities?: ("text" | "audio")[];
+  
+  // Sampling parameters
+  frequency_penalty?: number | null;
+  presence_penalty?: number | null;
+  seed?: number | null;
+  n?: number | null;
+  logit_bias?: Record<string, number> | null;
+  logprobs?: boolean | null;
+  top_logprobs?: number | null;
+  
+  // Reasoning parameters
   reasoning_effort?: "low" | "medium" | "high";
+  
+  // Extensions
   /** Chat template kwargs for providers like DeepSeek (e.g., enable_thinking) */
   chat_template_kwargs?: Record<string, unknown>;
+  /** Prediction/content to bias towards */
+  prediction?: {
+    type: "content";
+    content: string;
+  };
+  
+  // Passthrough parameters
+  /** Extra body parameters to pass to provider */
+  extra_body?: Record<string, unknown>;
+  /** Extra headers to include in the request */
+  extra_headers?: Record<string, string>;
+  /** Extra query parameters for the URL */
+  extra_query?: Record<string, string>;
+  
+  // Metadata
+  /** Unique identifier for the end-user */
+  user?: string;
+  /** Metadata to include with the request */
+  metadata?: Record<string, string>;
+  /** Store the output for later retrieval */
+  store?: boolean;
 }
 
+/**
+ * OpenAI streaming choice delta
+ */
 export interface OpenAIStreamChoice {
   index: number;
   delta: {
     role?: string;
-    content?: string;
+    content?: string | null;
     tool_calls?: Array<{
       index: number;
       id?: string;
@@ -251,13 +164,33 @@ export interface OpenAIStreamChoice {
         arguments?: string;
       };
     }>;
+    /** Reasoning content delta (DeepSeek, etc.) */
+    reasoning_content?: string;
   };
   finish_reason: string | null;
+  /** Logprobs if requested */
+  logprobs?: {
+    content?: Array<{
+      token: string;
+      logprob: number;
+      bytes?: number[];
+      top_logprobs?: Array<{
+        token: string;
+        logprob: number;
+        bytes?: number[];
+      }>;
+    }>;
+  };
 }
 
+/**
+ * OpenAI chat completion response
+ * 
+ * Full implementation of the OpenAI Chat Completions API response.
+ */
 export interface OpenAIResponse {
   id: string;
-  object: string;
+  object: "chat.completion" | "chat.completion.chunk";
   created: number;
   model: string;
   choices: Array<{
@@ -265,12 +198,214 @@ export interface OpenAIResponse {
     message?: OpenAIChatMessage;
     delta?: OpenAIChatMessage;
     finish_reason: string | null;
+    /** Logprobs if requested */
+    logprobs?: {
+      content?: Array<{
+        token: string;
+        logprob: number;
+        bytes?: number[];
+        top_logprobs?: Array<{
+          token: string;
+          logprob: number;
+          bytes?: number[];
+        }>;
+      }>;
+    };
   }>;
   usage?: {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+    /** OpenAI o-series reasoning tokens */
+    completion_tokens_details?: {
+      reasoning_tokens?: number;
+      accepted_prediction_tokens?: number;
+      rejected_prediction_tokens?: number;
+    };
   };
+  /** System fingerprint for deterministic responses */
+  system_fingerprint?: string;
+  /** Service tier used (OpenAI) */
+  service_tier?: "scale" | "default" | null;
+}
+
+// ============================================================================
+// Anthropic Types
+// ============================================================================
+
+/**
+ * Anthropic thinking configuration
+ */
+export interface AnthropicThinking {
+  type: "enabled" | "disabled";
+  budget_tokens?: number;
+}
+
+/**
+ * Anthropic cache control
+ */
+export interface AnthropicCacheControl {
+  type: "ephemeral";
+}
+
+/**
+ * Anthropic text content block
+ */
+export interface AnthropicTextBlock {
+  type: "text";
+  text: string;
+  cache_control?: AnthropicCacheControl;
+}
+
+/**
+ * Anthropic thinking content block
+ */
+export interface AnthropicThinkingBlock {
+  type: "thinking";
+  thinking: string;
+  signature: string;
+  cache_control?: AnthropicCacheControl;
+}
+
+/**
+ * Anthropic redacted thinking block
+ */
+export interface AnthropicRedactedThinkingBlock {
+  type: "redacted_thinking";
+  data: string;
+}
+
+/**
+ * Anthropic image source
+ */
+export interface AnthropicImageSource {
+  type: "base64";
+  media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  data: string;
+}
+
+/**
+ * Anthropic image content block
+ */
+export interface AnthropicImageBlock {
+  type: "image";
+  source: AnthropicImageSource;
+  cache_control?: AnthropicCacheControl;
+}
+
+/**
+ * Anthropic tool use block
+ */
+export interface AnthropicToolUseBlock {
+  type: "tool_use";
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+  cache_control?: AnthropicCacheControl;
+}
+
+/**
+ * Anthropic tool result block
+ */
+export interface AnthropicToolResultBlock {
+  type: "tool_result";
+  tool_use_id: string;
+  content: string | AnthropicContentBlock[];
+  is_error?: boolean;
+  cache_control?: AnthropicCacheControl;
+}
+
+/**
+ * Anthropic content block (union type)
+ */
+export type AnthropicContentBlock = 
+  | AnthropicTextBlock 
+  | AnthropicThinkingBlock
+  | AnthropicRedactedThinkingBlock
+  | AnthropicImageBlock
+  | AnthropicToolUseBlock
+  | AnthropicToolResultBlock;
+
+/**
+ * Anthropic message
+ */
+export interface AnthropicMessage {
+  role: "user" | "assistant";
+  content: string | AnthropicContentBlock[];
+}
+
+/**
+ * Anthropic tool definition
+ */
+export interface AnthropicTool {
+  name: string;
+  description?: string;
+  input_schema: {
+    type: "object";
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
+  cache_control?: AnthropicCacheControl;
+}
+
+/**
+ * Anthropic tool choice
+ */
+export type AnthropicToolChoice = 
+  | { type: "auto" }
+  | { type: "any" }
+  | { type: "tool"; name: string };
+
+/**
+ * Anthropic metadata
+ */
+export interface AnthropicMetadata {
+  user_id?: string;
+}
+
+/**
+ * Anthropic request
+ * 
+ * Reference: https://docs.anthropic.com/en/api/messages
+ */
+export interface AnthropicRequest {
+  model: string;
+  max_tokens: number;
+  messages: AnthropicMessage[];
+  system?: string | AnthropicTextBlock[];
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  stop_sequences?: string[];
+  stream?: boolean;
+  tools?: AnthropicTool[];
+  tool_choice?: AnthropicToolChoice;
+  thinking?: AnthropicThinking;
+  metadata?: AnthropicMetadata;
+}
+
+/**
+ * Anthropic usage
+ */
+export interface AnthropicUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+}
+
+/**
+ * Anthropic response
+ */
+export interface AnthropicResponse {
+  id: string;
+  type: "message";
+  role: "assistant";
+  model: string;
+  content: AnthropicContentBlock[];
+  stop_reason: "end_turn" | "max_tokens" | "stop_sequence" | "tool_use";
+  stop_sequence?: string;
+  usage: AnthropicUsage;
 }
 
 // ============================================================================
@@ -299,43 +434,15 @@ export interface LogEntry {
   transformedResponse?: unknown;
   error?: string;
   durationMs: number;
-  /** Whether this request was successfully routed */
   routed: boolean;
-  /** The matched route pattern (if any) */
   matchedPattern?: string;
 }
 
 // ============================================================================
-// Route Match Types
+// Provider Registry Types
 // ============================================================================
 
-export interface MatchResult {
-  matched: boolean;
-  captures: string[];
-}
-
-export interface RouteMatch {
-  provider: string;
-  model: string;
-  pattern?: string;
-}
-
-// ============================================================================
-// GUI Types
-// ============================================================================
-
-export interface UnroutedRequest {
-  id: string;
-  timestamp: string;
-  model: string;
-  apiKey: string;
-  streaming: boolean;
-  endpoint: string;
-  fullRequest: unknown;
-  headers: Record<string, string>;
-}
-
-export interface ProviderInfo {
+export interface ProviderDefinition {
   id: string;
   name: string;
   description: string;
@@ -348,17 +455,74 @@ export interface ProviderInfo {
   category: "cloud" | "local" | "custom";
 }
 
-export interface ConfigBackup {
-  filename: string;
-  createdAt: string;
-  size: number;
+// ============================================================================
+// Router Configuration Types
+// ============================================================================
+
+export interface RouteConfig {
+  pattern: string;
+  provider: string;
+  model?: string;
+  priority?: number;
+  /** Provider-specific options */
+  options?: Record<string, unknown>;
 }
 
-export interface SystemStatus {
-  status: "ok" | "error" | "warning";
-  version: string;
-  uptime: number;
-  activeProviders: string[];
-  totalRequests: number;
-  unroutedRequests: number;
+export interface ProviderConfig {
+  baseUrl: string;
+  apiKey?: string;
+  apiKeyEnv?: string;
+  authHeader?: string;
+  authPrefix?: string;
+  headers?: Record<string, string>;
+  timeout?: number;
+  supportsStreaming?: boolean;
+  /** Default options for this provider */
+  defaultOptions?: Record<string, unknown>;
+}
+
+export interface ApiSchemeConfig {
+  id: string;
+  path: string;
+  format: string;
+  /** Optional: transform rules for this scheme */
+  transformRules?: {
+    stripFields?: string[];
+    addFields?: Record<string, unknown>;
+    mapFields?: Record<string, string>;
+  };
+}
+
+export interface RouterConfig {
+  server?: {
+    port?: number;
+    externalPort?: number;
+    externalHost?: string;
+    host?: string;
+    cors?: {
+      origin?: string | string[];
+      credentials?: boolean;
+    };
+    timeout?: number;
+  };
+  logging?: {
+    dir?: string;
+    level?: string;
+    maskKeys?: boolean;
+  };
+  preload?: {
+    enabled?: boolean;
+    models?: string[];
+  };
+  schemes?: ApiSchemeConfig[];
+  providers: Record<string, ProviderConfig>;
+  routes: RouteConfig[];
+  /** Default provider when no route matches */
+  defaultProvider?: string;
+  /** Global transform rules applied to all requests */
+  globalTransformRules?: {
+    stripFields?: string[];
+    addFields?: Record<string, unknown>;
+    mapFields?: Record<string, string>;
+  };
 }

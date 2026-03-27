@@ -1,5 +1,5 @@
 // ============================================================================
-// OpenAI Format Transformer
+// OpenAI Format Transformer - Comprehensive implementation
 // ============================================================================
 
 import type {
@@ -7,13 +7,99 @@ import type {
   InternalResponse,
   InternalMessage,
   InternalContentBlock,
-  InternalStreamChunk,
   InternalTool,
   ToolChoice,
   ResponseFormat,
   TokenUsage,
+  LogprobInfo,
 } from "../types/internal.ts";
 import type { OpenAIRequest, OpenAIResponse, OpenAIChatMessage, OpenAITool, OpenAIToolCall } from "../types/index.ts";
+
+// ============================================================================
+// Content Block Transformations
+// ============================================================================
+
+/**
+ * Convert OpenAI content to internal content blocks
+ */
+function openAIContentToInternal(
+  content: string | null | Array<{ 
+    type: "text"; 
+    text: string 
+  } | { 
+    type: "image_url"; 
+    image_url: { url: string; detail?: string } 
+  } | {
+    type: "input_audio";
+    input_audio: { data: string; format: string }
+  } | {
+    type: "file";
+    file?: { file_data?: string; filename?: string; file_id?: string }
+  }>
+): string | InternalContentBlock[] {
+  if (content === null) return "";
+  if (typeof content === "string") return content;
+  
+  return content.map((item): InternalContentBlock => {
+    switch (item.type) {
+      case "text":
+        return { type: "text", text: item.text };
+      case "image_url":
+        return {
+          type: "image",
+          image: {
+            url: item.image_url.url,
+          },
+        };
+      case "input_audio":
+        return {
+          type: "audio",
+          audio: {
+            base64: item.input_audio.data,
+            mimeType: item.input_audio.format === "mp3" ? "audio/mpeg" : `audio/${item.input_audio.format}`,
+          },
+        };
+      case "file":
+        // Handle file data
+        if (item.file?.file_data) {
+          return {
+            type: "text",
+            text: `[File: ${item.file.filename || "unnamed"}]`,
+          };
+        }
+        return { type: "text", text: "" };
+      default:
+        return { type: "text", text: "" };
+    }
+  });
+}
+
+/**
+ * Convert internal content blocks to OpenAI format
+ */
+function internalContentToOpenAI(
+  content: string | InternalContentBlock[]
+): string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> {
+  if (typeof content === "string") return content;
+  
+  return content.map((block) => {
+    switch (block.type) {
+      case "text":
+        return { type: "text" as const, text: block.text || "" };
+      case "image":
+        return { type: "image_url" as const, image_url: { url: block.image?.url || "" } };
+      case "thinking":
+        // Thinking blocks are handled separately
+        return { type: "text" as const, text: "" };
+      default:
+        return { type: "text" as const, text: "" };
+    }
+  });
+}
+
+// ============================================================================
+// Tool Transformations
+// ============================================================================
 
 /**
  * Convert OpenAI tool to internal tool
@@ -41,46 +127,66 @@ function internalToolToOpenAI(tool: InternalTool): OpenAITool {
 }
 
 /**
- * Convert OpenAI message content to internal content blocks
+ * Convert OpenAI tool choice to internal tool choice
  */
-function openAIContentToInternal(
-  content: string | null | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>
-): string | InternalContentBlock[] {
-  if (content === null) return "";
-  if (typeof content === "string") return content;
-  
-  return content.map((item): InternalContentBlock => {
-    if (item.type === "text") {
-      return { type: "text", text: item.text };
-    } else {
-      return {
-        type: "image",
-        image: {
-          url: item.image_url.url,
-        },
-      };
-    }
-  });
+function openAIToolChoiceToInternal(
+  choice: "auto" | "required" | "none" | { type: "function"; function: { name: string } } | undefined
+): ToolChoice | undefined {
+  if (!choice) return undefined;
+  if (choice === "auto" || choice === "required" || choice === "none") return choice;
+  return { name: choice.function.name };
 }
 
 /**
- * Convert internal content blocks to OpenAI format
+ * Convert internal tool choice to OpenAI tool choice
  */
-function internalContentToOpenAI(
-  content: string | InternalContentBlock[]
-): string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> {
-  if (typeof content === "string") return content;
-  
-  return content.map((block): { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } } => {
-    if (block.type === "text") {
-      return { type: "text", text: block.text || "" };
-    } else if (block.type === "image") {
-      return { type: "image_url", image_url: { url: block.image?.url || "" } };
-    }
-    // Other types become empty text in OpenAI
-    return { type: "text", text: "" };
-  });
+function internalToolChoiceToOpenAI(
+  choice: ToolChoice | undefined
+): "auto" | "required" | "none" | { type: "function"; function: { name: string } } | undefined {
+  if (!choice) return undefined;
+  if (choice === "auto" || choice === "required" || choice === "none") return choice;
+  return { type: "function", function: { name: choice.name } };
 }
+
+// ============================================================================
+// Response Format Transformations
+// ============================================================================
+
+/**
+ * Convert OpenAI response format to internal response format
+ */
+function openAIResponseFormatToInternal(
+  format: { type: "text" } | { type: "json_object" } | { type: "json_schema"; json_schema: { name: string; schema: Record<string, unknown>; strict?: boolean } } | undefined
+): ResponseFormat | undefined {
+  if (!format) return undefined;
+  if (format.type === "text") return { type: "text" };
+  if (format.type === "json_object") return { type: "json" };
+  return { type: "json", schema: format.json_schema.schema };
+}
+
+/**
+ * Convert internal response format to OpenAI response format
+ */
+function internalResponseFormatToOpenAI(
+  format: ResponseFormat | undefined
+): { type: "text" } | { type: "json_object" } | { type: "json_schema"; json_schema: { name: string; schema: Record<string, unknown> } } | undefined {
+  if (!format) return undefined;
+  if (format.type === "text") return { type: "text" };
+  if (format.schema) {
+    return {
+      type: "json_schema",
+      json_schema: {
+        name: "response",
+        schema: format.schema,
+      },
+    };
+  }
+  return { type: "json_object" };
+}
+
+// ============================================================================
+// Message Transformations
+// ============================================================================
 
 /**
  * Convert OpenAI message to internal message
@@ -114,24 +220,21 @@ function openAIMessageToInternal(msg: OpenAIChatMessage): InternalMessage {
 }
 
 /**
- * Convert internal message to OpenAI format
+ * Convert internal message to OpenAI message
  */
 function internalMessageToOpenAI(msg: InternalMessage): OpenAIChatMessage {
   const openAIMsg: OpenAIChatMessage = {
     role: msg.role,
     content: internalContentToOpenAI(msg.content),
+    name: msg.name,
   };
-
-  if (msg.name) {
-    openAIMsg.name = msg.name;
-  }
 
   // Handle tool calls
   if (msg.toolCalls) {
     openAIMsg.tool_calls = msg.toolCalls
-      .filter(tc => tc.type === "tool_call")
-      .map((tc): OpenAIToolCall => ({
-        id: tc.toolCall?.id || "",
+      .filter((tc) => tc.type === "tool_call")
+      .map((tc, index): OpenAIToolCall => ({
+        id: tc.toolCall?.id || `call_${index}`,
         type: "function",
         function: {
           name: tc.toolCall?.name || "",
@@ -140,6 +243,7 @@ function internalMessageToOpenAI(msg: InternalMessage): OpenAIChatMessage {
       }));
   }
 
+  // Handle tool call ID
   if (msg.toolCallId) {
     openAIMsg.tool_call_id = msg.toolCallId;
   }
@@ -147,59 +251,73 @@ function internalMessageToOpenAI(msg: InternalMessage): OpenAIChatMessage {
   return openAIMsg;
 }
 
+// ============================================================================
+// Logprob Transformations
+// ============================================================================
+
 /**
- * Convert OpenAI tool choice to internal
+ * Parse OpenAI logprobs to internal format
  */
-function openAIToolChoiceToInternal(
-  choice: "auto" | "required" | "none" | { type: "function"; function: { name: string } } | undefined
-): ToolChoice | undefined {
-  if (!choice) return undefined;
-  if (choice === "auto" || choice === "required" || choice === "none") return choice;
-  if (typeof choice === "object" && choice.type === "function") {
-    return { name: choice.function.name };
-  }
-  return "auto";
+function parseOpenAILogprobs(logprobs: {
+  content?: Array<{
+    token: string;
+    logprob: number;
+    bytes?: number[];
+    top_logprobs?: Array<{
+      token: string;
+      logprob: number;
+      bytes?: number[];
+    }>;
+  }>;
+} | null | undefined): LogprobInfo[] | undefined {
+  if (!logprobs?.content) return undefined;
+  
+  return logprobs.content.map((item) => ({
+    token: item.token,
+    logprob: item.logprob,
+    bytes: item.bytes,
+    topLogprobs: item.top_logprobs?.map((top) => ({
+      token: top.token,
+      logprob: top.logprob,
+      bytes: top.bytes,
+    })),
+  }));
 }
 
 /**
- * Convert internal tool choice to OpenAI
+ * Convert internal logprobs to OpenAI format
  */
-function internalToolChoiceToOpenAI(choice: ToolChoice | undefined): OpenAIRequest["tool_choice"] {
-  if (!choice) return undefined;
-  if (choice === "auto" || choice === "required" || choice === "none") return choice;
-  return { type: "function", function: { name: choice.name } };
-}
-
-/**
- * Convert OpenAI response format to internal
- */
-function openAIResponseFormatToInternal(
-  format: { type: "text" } | { type: "json_object" } | { type: "json_schema"; json_schema: { name: string; schema: Record<string, unknown>; strict?: boolean } } | undefined
-): ResponseFormat | undefined {
-  if (!format) return undefined;
-  if (format.type === "text") return { type: "text" };
-  if (format.type === "json_schema") {
-    return { type: "json", schema: format.json_schema.schema };
-  }
-  // json_object becomes generic json
-  return { type: "json" };
-}
-
-/**
- * Convert internal response format to OpenAI
- */
-function internalResponseFormatToOpenAI(format: ResponseFormat | undefined): OpenAIRequest["response_format"] {
-  if (!format) return undefined;
-  if (format.type === "text") return { type: "text" };
+function internalLogprobsToOpenAI(logprobs: LogprobInfo[] | undefined): {
+  content: Array<{
+    token: string;
+    logprob: number;
+    bytes?: number[];
+    top_logprobs?: Array<{
+      token: string;
+      logprob: number;
+      bytes?: number[];
+    }>;
+  }>;
+} | undefined {
+  if (!logprobs) return undefined;
+  
   return {
-    type: "json_schema",
-    json_schema: {
-      name: "response",
-      schema: format.schema || { type: "object" },
-      strict: true,
-    },
+    content: logprobs.map((item) => ({
+      token: item.token,
+      logprob: item.logprob,
+      bytes: item.bytes,
+      top_logprobs: item.topLogprobs?.map((top) => ({
+        token: top.token,
+        logprob: top.logprob,
+        bytes: top.bytes,
+      })),
+    })),
   };
 }
+
+// ============================================================================
+// Request Transformations
+// ============================================================================
 
 /**
  * Parse OpenAI request to internal format
@@ -209,36 +327,79 @@ export function parseOpenAIRequest(
   metadata: InternalRequest["metadata"]
 ): InternalRequest {
   // Extract system message if present
-  const systemMessages = body.messages.filter(m => m.role === "system");
-  const chatMessages = body.messages.filter(m => m.role !== "system");
-  
-  const system = systemMessages.length > 0 
-    ? systemMessages.map(m => typeof m.content === "string" ? m.content : "").join("\n")
+  const systemMessages = body.messages.filter((m) => m.role === "system");
+  const chatMessages = body.messages.filter((m) => m.role !== "system");
+
+  const system = systemMessages.length > 0
+    ? systemMessages.map((m) => (typeof m.content === "string" ? m.content : "")).join("\n")
     : undefined;
 
-  // Build extensions from chat_template_kwargs
+  // Build extensions from various passthrough parameters
   const extensions: Record<string, unknown> = {};
   if (body.chat_template_kwargs) {
     extensions.chat_template_kwargs = body.chat_template_kwargs;
-    // Extract enable_thinking if present
     if (body.chat_template_kwargs.enable_thinking !== undefined) {
       extensions.enable_thinking = body.chat_template_kwargs.enable_thinking;
     }
+  }
+  if (body.extra_body) {
+    extensions.extra_body = body.extra_body;
+  }
+  if (body.extra_headers) {
+    extensions.extra_headers = body.extra_headers;
+  }
+  if (body.extra_query) {
+    extensions.extra_query = body.extra_query;
+  }
+  if (body.metadata) {
+    extensions.metadata = body.metadata;
   }
 
   return {
     model: body.model,
     messages: chatMessages.map(openAIMessageToInternal),
     system,
-    maxTokens: body.max_tokens ?? body.max_completion_tokens,
-    temperature: body.temperature,
-    topP: body.top_p,
-    stream: body.stream,
-    stopSequences: body.stop,
+    
+    // Core parameters
+    maxTokens: body.max_tokens ?? body.max_completion_tokens ?? undefined,
+    maxCompletionTokens: body.max_completion_tokens ?? undefined,
+    temperature: body.temperature ?? undefined,
+    topP: body.top_p ?? undefined,
+    stream: body.stream ?? undefined,
+    stopSequences: body.stop ? (Array.isArray(body.stop) ? body.stop : [body.stop]) : undefined,
+    
+    // Tool parameters
     tools: body.tools?.map(openAIToolToInternal),
     toolChoice: openAIToolChoiceToInternal(body.tool_choice),
+    parallelToolCalls: body.parallel_tool_calls ?? undefined,
+    
+    // Response format
     responseFormat: openAIResponseFormatToInternal(body.response_format),
-    reasoningEffort: body.reasoning_effort,
+    modalities: body.modalities ?? undefined,
+    
+    // Sampling parameters
+    frequencyPenalty: body.frequency_penalty ?? undefined,
+    presencePenalty: body.presence_penalty ?? undefined,
+    seed: body.seed ?? undefined,
+    n: body.n ?? undefined,
+    logitBias: body.logit_bias ?? undefined,
+    logprobs: body.logprobs ?? undefined,
+    topLogprobs: body.top_logprobs ?? undefined,
+    
+    // Reasoning parameters
+    reasoningEffort: body.reasoning_effort ?? undefined,
+    
+    // Extensions
+    chatTemplateKwargs: body.chat_template_kwargs ?? undefined,
+    prediction: body.prediction ?? undefined,
+    
+    // Passthrough
+    extraBody: body.extra_body ?? undefined,
+    extraHeaders: body.extra_headers ?? undefined,
+    extraQuery: body.extra_query ?? undefined,
+    
+    // Metadata
+    user: body.user ?? undefined,
     extensions: Object.keys(extensions).length > 0 ? extensions : undefined,
     metadata,
   };
@@ -255,7 +416,6 @@ export function toOpenAIRequest(request: InternalRequest): OpenAIRequest {
     if (typeof request.system === "string") {
       messages.push({ role: "system", content: request.system });
     } else {
-      // Convert content blocks to text
       const systemText = request.system
         .filter((b) => b.type === "text")
         .map((b) => (b as { type: "text"; text?: string }).text || "")
@@ -270,27 +430,63 @@ export function toOpenAIRequest(request: InternalRequest): OpenAIRequest {
   const result: OpenAIRequest = {
     model: request.targetModel || request.model,
     messages,
-    stream: request.stream,
   };
 
-  if (request.maxTokens) result.max_tokens = request.maxTokens;
+  // Core parameters
+  if (request.maxTokens !== undefined) result.max_tokens = request.maxTokens;
+  if (request.maxCompletionTokens !== undefined) result.max_completion_tokens = request.maxCompletionTokens;
   if (request.temperature !== undefined) result.temperature = request.temperature;
   if (request.topP !== undefined) result.top_p = request.topP;
-  if (request.stopSequences) result.stop = request.stopSequences;
-  if (request.tools) result.tools = request.tools.map(internalToolToOpenAI);
-  if (request.toolChoice) result.tool_choice = internalToolChoiceToOpenAI(request.toolChoice);
-  if (request.responseFormat) result.response_format = internalResponseFormatToOpenAI(request.responseFormat);
-  if (request.reasoningEffort && typeof request.reasoningEffort === "string") {
+  if (request.stream !== undefined) result.stream = request.stream;
+  if (request.stopSequences !== undefined) result.stop = request.stopSequences;
+  
+  // Tool parameters
+  if (request.tools !== undefined) result.tools = request.tools.map(internalToolToOpenAI);
+  if (request.toolChoice !== undefined) result.tool_choice = internalToolChoiceToOpenAI(request.toolChoice);
+  if (request.parallelToolCalls !== undefined) result.parallel_tool_calls = request.parallelToolCalls;
+  
+  // Response format
+  if (request.responseFormat !== undefined) result.response_format = internalResponseFormatToOpenAI(request.responseFormat);
+  if (request.modalities !== undefined) result.modalities = request.modalities;
+  
+  // Sampling parameters
+  if (request.frequencyPenalty !== undefined) result.frequency_penalty = request.frequencyPenalty;
+  if (request.presencePenalty !== undefined) result.presence_penalty = request.presencePenalty;
+  if (request.seed !== undefined) result.seed = request.seed;
+  if (request.n !== undefined) result.n = request.n;
+  if (request.logitBias !== undefined) result.logit_bias = request.logitBias;
+  if (request.logprobs !== undefined) result.logprobs = request.logprobs;
+  if (request.topLogprobs !== undefined) result.top_logprobs = request.topLogprobs;
+  
+  // Reasoning parameters
+  if (request.reasoningEffort !== undefined && typeof request.reasoningEffort === "string") {
     result.reasoning_effort = request.reasoningEffort;
   }
-
-  // Pass through chat_template_kwargs if present (for providers like DeepSeek)
-  if (request.extensions?.chat_template_kwargs) {
-    result.chat_template_kwargs = request.extensions.chat_template_kwargs as Record<string, unknown>;
+  
+  // Extensions
+  if (request.chatTemplateKwargs !== undefined) result.chat_template_kwargs = request.chatTemplateKwargs;
+  if (request.prediction !== undefined) result.prediction = request.prediction;
+  
+  // Passthrough from extensions
+  if (request.extensions?.extra_body) {
+    result.extra_body = request.extensions.extra_body as Record<string, unknown>;
   }
+  if (request.extensions?.extra_headers) {
+    result.extra_headers = request.extensions.extra_headers as Record<string, string>;
+  }
+  if (request.extensions?.extra_query) {
+    result.extra_query = request.extensions.extra_query as Record<string, string>;
+  }
+  
+  // Metadata
+  if (request.user !== undefined) result.user = request.user;
 
   return result;
 }
+
+// ============================================================================
+// Response Transformations
+// ============================================================================
 
 /**
  * Parse OpenAI response to internal format
@@ -306,11 +502,11 @@ export function parseOpenAIResponse(data: OpenAIResponse): InternalResponse {
     if (typeof message.content === "string") {
       content.push({ type: "text", text: message.content });
     } else {
-      content.push(...message.content.map((c): InternalContentBlock => 
-        c.type === "text" 
-          ? { type: "text", text: c.text }
-          : { type: "image", image: { url: c.image_url.url } }
-      ));
+      content.push(
+        ...message.content.map((c): InternalContentBlock =>
+          c.type === "text" ? { type: "text", text: c.text } : { type: "image", image: { url: c.image_url?.url || "" } }
+        )
+      );
     }
   }
 
@@ -338,10 +534,16 @@ export function parseOpenAIResponse(data: OpenAIResponse): InternalResponse {
   else if (finishReason === "length") stopReason = "max_tokens";
   else if (finishReason === "content_filter") stopReason = "content_filter";
 
-  // Capture reasoning_content if present (e.g., from DeepSeek)
+  // Build extensions
   const extensions: Record<string, unknown> = {};
   if (message?.reasoning_content) {
     extensions.reasoning_content = message.reasoning_content;
+  }
+  if (choice?.logprobs) {
+    extensions.logprobs = choice.logprobs;
+  }
+  if (data.system_fingerprint) {
+    extensions.system_fingerprint = data.system_fingerprint;
   }
 
   return {
@@ -350,11 +552,17 @@ export function parseOpenAIResponse(data: OpenAIResponse): InternalResponse {
     content,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     stopReason,
-    usage: data.usage ? {
-      promptTokens: data.usage.prompt_tokens,
-      completionTokens: data.usage.completion_tokens,
-      totalTokens: data.usage.total_tokens,
-    } : undefined,
+    usage: data.usage
+      ? {
+          promptTokens: data.usage.prompt_tokens,
+          completionTokens: data.usage.completion_tokens,
+          totalTokens: data.usage.total_tokens,
+          reasoningTokens: data.usage.completion_tokens_details?.reasoning_tokens,
+        }
+      : undefined,
+    logprobs: parseOpenAILogprobs(choice?.logprobs),
+    systemFingerprint: data.system_fingerprint,
+    reasoningContent: message?.reasoning_content,
     extensions: Object.keys(extensions).length > 0 ? extensions : undefined,
   };
 }
@@ -365,13 +573,13 @@ export function parseOpenAIResponse(data: OpenAIResponse): InternalResponse {
 export function toOpenAIResponse(response: InternalResponse): OpenAIResponse {
   // Convert content blocks to text
   const textContent = response.content
-    .filter(c => c.type === "text")
-    .map(c => c.text)
+    .filter((c) => c.type === "text")
+    .map((c) => c.text)
     .join("");
 
   // Convert tool calls
   const toolCalls = response.toolCalls
-    ?.filter(tc => tc.type === "tool_call")
+    ?.filter((tc) => tc.type === "tool_call")
     .map((tc, index): OpenAIToolCall => ({
       id: tc.toolCall?.id || `call_${index}`,
       type: "function",
@@ -394,10 +602,25 @@ export function toOpenAIResponse(response: InternalResponse): OpenAIResponse {
     content: textContent || null,
     tool_calls: toolCalls,
   };
-  
-  // Include reasoning_content from extensions (e.g., from DeepSeek)
-  if (response.extensions?.reasoning_content) {
+
+  // Include reasoning_content from extensions or direct field
+  if (response.reasoningContent) {
+    message.reasoning_content = response.reasoningContent;
+  } else if (response.extensions?.reasoning_content) {
     message.reasoning_content = response.extensions.reasoning_content as string;
+  }
+
+  // Build choices
+  const choices: OpenAIResponse["choices"] = [{
+    index: 0,
+    message,
+    finish_reason: finishReason,
+  }];
+
+  // Add logprobs if present
+  const logprobs = response.logprobs ? internalLogprobsToOpenAI(response.logprobs) : undefined;
+  if (logprobs) {
+    choices[0].logprobs = logprobs;
   }
 
   return {
@@ -405,18 +628,26 @@ export function toOpenAIResponse(response: InternalResponse): OpenAIResponse {
     object: "chat.completion",
     created: Math.floor(Date.now() / 1000),
     model: response.model,
-    choices: [{
-      index: 0,
-      message,
-      finish_reason: finishReason,
-    }],
-    usage: response.usage ? {
-      prompt_tokens: response.usage.promptTokens,
-      completion_tokens: response.usage.completionTokens,
-      total_tokens: response.usage.totalTokens,
-    } : undefined,
+    choices,
+    usage: response.usage
+      ? {
+          prompt_tokens: response.usage.promptTokens,
+          completion_tokens: response.usage.completionTokens,
+          total_tokens: response.usage.totalTokens,
+          completion_tokens_details: response.usage.reasoningTokens
+            ? { reasoning_tokens: response.usage.reasoningTokens }
+            : undefined,
+        }
+      : undefined,
+    system_fingerprint: response.systemFingerprint,
   };
 }
+
+// ============================================================================
+// Streaming Transformations
+// ============================================================================
+
+import type { InternalStreamChunk } from "../types/internal.ts";
 
 /**
  * Parse OpenAI streaming chunk to internal format
@@ -434,6 +665,12 @@ export function parseOpenAIStreamChunk(data: Record<string, unknown>): InternalS
   // Handle text content
   if (typeof delta.content === "string") {
     deltaContent.push({ type: "text", text: delta.content });
+  }
+
+  // Handle reasoning_content in streaming (e.g., from DeepSeek)
+  const reasoningContent = delta.reasoning_content as string | undefined;
+  if (reasoningContent) {
+    deltaContent.push({ type: "thinking", text: reasoningContent });
   }
 
   // Handle tool calls
@@ -459,17 +696,23 @@ export function parseOpenAIStreamChunk(data: Record<string, unknown>): InternalS
   const finishReason = choice.finish_reason as string | null;
   const isComplete = finishReason !== null && finishReason !== undefined;
 
-  // Handle reasoning_content in streaming (e.g., from DeepSeek)
-  const reasoningContent = delta.reasoning_content as string;
-  if (reasoningContent) {
-    deltaContent.push({ type: "thinking", text: reasoningContent });
-  }
+  // Parse logprobs if present
+  const chunkLogprobs = choice.logprobs as {
+    content?: Array<{
+      token: string;
+      logprob: number;
+      bytes?: number[];
+      top_logprobs?: Array<{ token: string; logprob: number; bytes?: number[] }>;
+    }>;
+  } | null | undefined;
 
   return {
     index,
     delta: deltaContent[0] || { type: "text", text: "" },
     finishReason,
     isComplete,
+    logprobs: parseOpenAILogprobs(chunkLogprobs),
+    reasoningContent,
   };
 }
 
@@ -482,28 +725,49 @@ export function toOpenAIStreamChunk(chunk: InternalStreamChunk, model: string): 
     object: "chat.completion.chunk",
     created: Math.floor(Date.now() / 1000),
     model,
-    choices: [{
-      index: chunk.index,
-      delta: {},
-      finish_reason: chunk.finishReason,
-    }],
+    choices: [
+      {
+        index: chunk.index,
+        delta: {},
+        finish_reason: chunk.finishReason,
+      },
+    ],
   };
 
-  const choices = data.choices as Array<{ index?: number; delta: Record<string, unknown>; finish_reason?: string | null }>;
+  const choices = data.choices as Array<{
+    index?: number;
+    delta: Record<string, unknown>;
+    finish_reason?: string | null;
+    logprobs?: unknown;
+  }>;
   const delta = choices[0]!.delta;
 
   if (chunk.delta.type === "text" && chunk.delta.text) {
     delta.content = chunk.delta.text;
-  } else if (chunk.delta.type === "tool_call" && chunk.delta.toolCall) {
-    delta.tool_calls = [{
-      index: chunk.index,
-      id: chunk.delta.toolCall.id,
-      type: "function",
-      function: {
-        name: chunk.delta.toolCall.name,
-        arguments: chunk.delta.toolCall.argumentsJson,
+  }
+
+  if (chunk.delta.type === "tool_call" && chunk.delta.toolCall) {
+    delta.tool_calls = [
+      {
+        index: 0,
+        id: chunk.delta.toolCall.id,
+        type: "function",
+        function: {
+          name: chunk.delta.toolCall.name,
+          arguments: chunk.delta.toolCall.argumentsJson || JSON.stringify(chunk.delta.toolCall.arguments),
+        },
       },
-    }];
+    ];
+  }
+
+  // Include reasoning_content if present
+  if (chunk.reasoningContent) {
+    delta.reasoning_content = chunk.reasoningContent;
+  }
+
+  // Include logprobs if present
+  if (chunk.logprobs) {
+    choices[0].logprobs = internalLogprobsToOpenAI(chunk.logprobs);
   }
 
   return `data: ${JSON.stringify(data)}\n\n`;
