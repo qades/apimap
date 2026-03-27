@@ -88,12 +88,6 @@ jobs:
       run: |
         docker load < /tmp/apimap-benchmark.tar
 
-    - name: Free up disk space
-      run: |
-        docker system prune -af
-        rm -rf /opt/ghc
-        rm -rf /usr/local/lib/android
-
     - name: Run quick benchmark
       run: |
         cd bench
@@ -183,12 +177,6 @@ jobs:
     - name: Load API Map image
       run: |
         docker load < /tmp/apimap-benchmark.tar
-
-    - name: Free up disk space
-      run: |
-        docker system prune -af
-        rm -rf /opt/ghc
-        rm -rf /usr/local/lib/android
 
     - name: Run full benchmark
       run: |

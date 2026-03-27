@@ -26,6 +26,15 @@
 - Release ports (3000, 3001, etc.)
 - Terminate WebSocket connections
 
+### 5. CI/CD Cleanup: Non-Destructive Only
+- **NEVER run `docker system prune -af`** in CI workflows - it deletes images needed by other jobs
+- **NEVER remove system folders** like `/usr/local/lib/android`, `/opt/ghc`, etc.
+- **NEVER stop random containers** with `docker ps -aq` - shared runners have other jobs
+- **ONLY clean up what you started**: 
+  - Use `docker-compose down` (or `docker compose down`) for compose-managed services
+  - Kill only processes you spawned
+  - Use `|| true` for cleanup commands to prevent failures from breaking the build
+
 ## Pre-Completion Checklist
 
 Before marking any task complete:
