@@ -207,9 +207,9 @@ class DockerComposeManager {
   }
 
   async start(): Promise<void> {
-    console.log('\n🚀 Starting services with docker-compose...');
+    console.log('\n🚀 Starting services with docker compose...');
     
-    // Set environment variables for docker-compose
+    // Set environment variables for docker compose
     const env = {
       ...process.env,
       MOCK_LATENCY_MEAN_MS: String(this.config.latencyMeanMs),
@@ -221,7 +221,7 @@ class DockerComposeManager {
 
     // Start services (excluding benchmark and visualize profiles)
     // Note: Using -d without --wait for compatibility with podman-compose
-    const proc = Bun.spawn(['docker-compose', 'up', '-d', 'mock-server', 'litellm', 'apimap'], {
+    const proc = Bun.spawn(['docker', 'compose', 'up', '-d', 'mock-server', 'litellm', 'apimap'], {
       env,
       stdout: 'inherit',
       stderr: 'inherit',
@@ -229,7 +229,7 @@ class DockerComposeManager {
 
     const exitCode = await proc.exited;
     if (exitCode !== 0) {
-      throw new Error(`docker-compose up failed with exit code ${exitCode}`);
+      throw new Error(`docker compose up failed with exit code ${exitCode}`);
     }
 
     this.isRunning = true;
@@ -278,7 +278,7 @@ class DockerComposeManager {
     if (!this.isRunning) return;
     
     console.log('\n🛑 Stopping services...');
-    const proc = Bun.spawnSync(['docker-compose', 'down', '-v'], {
+    const proc = Bun.spawnSync(['docker', 'compose', 'down', '-v'], {
       stdout: 'inherit',
       stderr: 'inherit',
     });
@@ -1143,11 +1143,11 @@ OUTPUT:
 
 OTHER:
     --quick                 Run quick test (fewer requests)
-    --keep-services         Don't stop docker-compose services after benchmark
+    --keep-services         Don't stop docker compose services after benchmark
     --help, -h              Show this help
 
 EXAMPLES:
-    # Default benchmark (all 3 targets, docker-compose managed)
+    # Default benchmark (all 3 targets, docker compose managed)
     bun run benchmark
 
     # Test with 0% error rate
