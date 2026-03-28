@@ -47,40 +47,78 @@ def calculate_stats(latencies: list) -> dict:
     }
 
 
+def get_protocol_from_scenario(scenario_name: str, config: dict) -> str:
+    """Extract protocol description from scenario configuration."""
+    for scenario in config.get('scenarios', []):
+        if scenario.get('name') == scenario_name:
+            protocol = scenario.get('protocol', {})
+            return protocol.get('description', 'OpenAI→OpenAI')
+    return 'OpenAI→OpenAI'
+
+
+def group_by_protocol(results: list, config: dict) -> dict:
+    """Group results by protocol for side-by-side comparison."""
+    grouped = {}
+    for r in results:
+        scenario = r.get('scenario', '')
+        protocol = get_protocol_from_scenario(scenario, config)
+        if protocol not in grouped:
+            grouped[protocol] = []
+        grouped[protocol].append(r)
+    return grouped
+
+
 def print_text_report(data: dict):
-    """Print a text-based report."""
+    """Print a text-based report grouped by protocol."""
     print("\n" + "="*70)
     print("BENCHMARK RESULTS")
     print("="*70)
     print(f"Timestamp: {data.get('timestamp', 'N/A')}")
+    config = data.get('config', {})
     
-    # Latency results
-    if 'latency' in data:
-        print("\n--- Latency Benchmark ---")
-        print(f"{'Target':<15} {'Scenario':<12} {'Mean':<10} {'P95':<10} {'P99':<10} {'Errors':<10}")
-        print("-" * 70)
-        for r in data['latency']:
-            stats = calculate_stats(r.get('latencies', []))
-            print(f"{r['target']:<15} {r['scenario']:<12} {stats['mean']:<10.1f} "
-                  f"{stats['p95']:<10.1f} {stats['p99']:<10.1f} {r.get('errors', 0):<10}")
+    # Latency results - grouped by protocol
+    if 'latency' in data and data['latency']:
+        print("\n--- Latency Benchmark by Protocol ---")
+        latency_by_protocol = group_by_protocol(data['latency'], config)
+        for protocol, results in sorted(latency_by_protocol.items()):
+            print(f"\n[{protocol}]")
+            print(f"{'Target':<15} {'Scenario':<12} {'Mean':<10} {'P95':<10} {'P99':<10} {'Errors':<10}")
+            print("-" * 70)
+            for r in results:
+                stats = calculate_stats(r.get('latencies', []))
+                print(f"{r['target']:<15} {r['scenario']:<12} {stats['mean']:<10.1f} "
+                      f"{stats['p95']:<10.1f} {stats['p99']:<10.1f} {r.get('errors', 0):<10}")
     
-    # Throughput results
-    if 'throughput' in data:
-        print("\n--- Throughput Benchmark ---")
-        print(f"{'Target':<15} {'Scenario':<12} {'Req/sec':<12} {'Duration':<12} {'Success':<10}")
-        print("-" * 70)
-        for r in data['throughput']:
-            print(f"{r['target']:<15} {r['scenario']:<12} {r['requestsPerSecond']:<12.1f} "
-                  f"{r['durationMs']:<12.1f} {r['totalRequests']}/{r['totalRequests'] + r['errors']}")
+    # Throughput results - grouped by protocol
+    if 'throughput' in data and data['throughput']:
+        print("\n--- Throughput Benchmark by Protocol ---")
+        throughput_by_protocol = group_by_protocol(data['throughput'], config)
+        for protocol, results in sorted(throughput_by_protocol.items()):
+            print(f"\n[{protocol}]")
+            print(f"{'Target':<15} {'Scenario':<12} {'Req/sec':<12} {'Duration':<12} {'Success':<10}")
+            print("-" * 70)
+            for r in results:
+                print(f"{r['target']:<15} {r['scenario']:<12} {r['requestsPerSecond']:<12.1f} "
+                      f"{r['durationMs']:<12.1f} {r['totalRequests']}/{r['totalRequests'] + r['errors']}")
     
-    # Streaming results
+    # Streaming results - grouped by protocol
     if 'streaming' in data and data['streaming']:
-        print("\n--- Streaming Benchmark ---")
-        print(f"{'Target':<15} {'TTFT (ms)':<12} {'TTLT (ms)':<12} {'Tokens/sec':<12} {'Errors':<10}")
-        print("-" * 70)
+        print("\n--- Streaming Benchmark by Protocol ---")
+        # Group streaming results by protocol
+        streaming_by_protocol = {}
         for r in data['streaming']:
-            print(f"{r['target']:<15} {r['timeToFirstTokenMs']:<12.1f} "
-                  f"{r['timeToLastTokenMs']:<12.1f} {r['tokensPerSec']:<12.1f} {r.get('errors', 0):<10}")
+            protocol = r.get('protocol', 'OpenAI→OpenAI')
+            if protocol not in streaming_by_protocol:
+                streaming_by_protocol[protocol] = []
+            streaming_by_protocol[protocol].append(r)
+        
+        for protocol, results in sorted(streaming_by_protocol.items()):
+            print(f"\n[{protocol}]")
+            print(f"{'Target':<15} {'TTFT (ms)':<12} {'TTLT (ms)':<12} {'Tokens/sec':<12} {'Errors':<10}")
+            print("-" * 70)
+            for r in results:
+                print(f"{r['target']:<15} {r['timeToFirstTokenMs']:<12.1f} "
+                      f"{r['timeToLastTokenMs']:<12.1f} {r['tokensPerSec']:<12.1f} {r.get('errors', 0):<10}")
     
     print("\n" + "="*70)
 

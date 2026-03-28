@@ -47,19 +47,37 @@ interface ScenarioConfig {
   contextSize: number;
   maxTokens: number;
   useStreaming: boolean;
-  protocol?: ProtocolConfig;
+  protocol?: ProtocolCombination;
 }
 
-interface ProtocolConfig {
-  sourceFormat: 'openai' | 'anthropic';
-  endpoint: string;
+// Protocol (format) definitions with their associated endpoints
+interface Protocol {
+  format: 'openai-chat' | 'anthropic-messages' | 'openai-responses' | 'openai-completions';
+  endpoints: string[];
   description: string;
 }
 
-// Protocol combinations to test
-const PROTOCOL_COMBINATIONS: ProtocolConfig[] = [
-  { sourceFormat: 'openai', endpoint: '/v1/chat/completions', description: 'OpenAI→OpenAI' },
-  { sourceFormat: 'anthropic', endpoint: '/v1/messages', description: 'Anthropic→OpenAI' },
+const PROTOCOLS: Protocol[] = [
+  { format: 'openai-chat', endpoints: ['/v1/chat/completions'], description: 'OpenAI Chat Completions' },
+  { format: 'anthropic-messages', endpoints: ['/v1/messages'], description: 'Anthropic Messages' },
+  { format: 'openai-responses', endpoints: ['/v1/responses'], description: 'OpenAI Responses' },
+  { format: 'openai-completions', endpoints: ['/v1/completions'], description: 'OpenAI Legacy Completions' },
+];
+
+// Protocol combinations to test: pairs of (source_format, target_format)
+// Since all providers speak OpenAI, target is always openai-chat for now
+// Future: can test Anthropic→Anthropic, OpenAI→Anthropic, etc.
+interface ProtocolCombination {
+  sourceFormat: Protocol['format'];
+  targetFormat: Protocol['format'];
+  description: string;
+}
+
+const PROTOCOL_COMBINATIONS: ProtocolCombination[] = [
+  { sourceFormat: 'openai-chat', targetFormat: 'openai-chat', description: 'OpenAI→OpenAI' },
+  { sourceFormat: 'anthropic-messages', targetFormat: 'openai-chat', description: 'Anthropic→OpenAI' },
+  { sourceFormat: 'openai-responses', targetFormat: 'openai-chat', description: 'Responses→OpenAI' },
+  { sourceFormat: 'openai-completions', targetFormat: 'openai-chat', description: 'Completions→OpenAI' },
 ];
 
 interface LatencyResult {
@@ -90,6 +108,8 @@ interface StreamingMetrics {
 
 interface StreamingResult {
   target: string;
+  scenario?: string;
+  protocol?: string;
   timeToFirstTokenMs: number;
   timeToLastTokenMs: number;
   tokensPerSec: number;
@@ -512,28 +532,40 @@ class GatewayClient {
     messages: Array<{role: string, content: string}>,
     maxTokens: number,
     stream: boolean,
-    protocol?: ProtocolConfig,
+    protocol?: ProtocolCombination,
   ): Promise<{ latencyMs: number; success: boolean; tokens?: number; streamingMetrics?: StreamingMetrics }> {
     const start = performance.now();
     
     // Determine endpoint and request format based on protocol
-    const endpoint = protocol?.endpoint || '/v1/chat/completions';
-    const isAnthropic = endpoint === '/v1/messages';
+    const sourceFormat = protocol?.sourceFormat || 'openai-chat';
+    const protocolDef = PROTOCOLS.find(p => p.format === sourceFormat);
+    const endpoint = protocolDef?.endpoints[0] || '/v1/chat/completions';
+    
+    // Body builders by format
+    const bodyBuilders: Record<string, () => Record<string, unknown>> = {
+      'openai-chat': () => this.buildOpenAIBody(model, messages, maxTokens, stream),
+      'anthropic-messages': () => this.buildAnthropicBody(model, messages, maxTokens, stream),
+      'openai-responses': () => this.buildResponsesBody(model, messages, maxTokens, stream),
+      'openai-completions': () => this.buildCompletionsBody(model, messages, maxTokens, stream),
+    };
+    
+    // Headers by format
+    const headerBuilders: Record<string, () => Record<string, string>> = {
+      'openai-chat': () => ({}),
+      'anthropic-messages': () => ({ 'anthropic-version': '2023-06-01' }),
+      'openai-responses': () => ({}),
+      'openai-completions': () => ({}),
+    };
     
     try {
-      const body = isAnthropic 
-        ? this.buildAnthropicBody(model, messages, maxTokens, stream)
-        : this.buildOpenAIBody(model, messages, maxTokens, stream);
+      const body = bodyBuilders[sourceFormat]();
+      const formatHeaders = headerBuilders[sourceFormat]();
         
       const headers: Record<string, string> = {
         'Authorization': `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json',
+        ...formatHeaders,
       };
-      
-      // Anthropic requires API version header
-      if (isAnthropic) {
-        headers['anthropic-version'] = '2023-06-01';
-      }
       
       const resp = await fetch(`${this.url}${endpoint}`, {
         method: 'POST',
@@ -556,7 +588,8 @@ class GatewayClient {
       }
 
       if (stream) {
-        const streamingMetrics = await this.handleStreamingResponse(resp, start, isAnthropic);
+        const isAnthropicFormat = sourceFormat === 'anthropic-messages';
+        const streamingMetrics = await this.handleStreamingResponse(resp, start, isAnthropicFormat);
         return { latencyMs: performance.now() - start, success: true, streamingMetrics };
       } else {
         await resp.text();
@@ -616,6 +649,44 @@ class GatewayClient {
     }
     
     return body;
+  }
+  
+  private buildResponsesBody(
+    model: string,
+    messages: Array<{role: string, content: string}>,
+    maxTokens: number,
+    stream: boolean,
+  ): Record<string, unknown> {
+    // Convert messages to OpenAI Responses API format (uses "input" instead of "messages")
+    const input = messages.map(m => ({
+      role: m.role,
+      content: m.content,
+    }));
+    
+    return {
+      model,
+      input,
+      max_tokens: maxTokens,
+      stream,
+    };
+  }
+  
+  private buildCompletionsBody(
+    model: string,
+    messages: Array<{role: string, content: string}>,
+    maxTokens: number,
+    stream: boolean,
+  ): Record<string, unknown> {
+    // Convert messages to legacy Completions API format (uses "prompt" instead of "messages")
+    // Join all messages into a single prompt string
+    const prompt = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+    
+    return {
+      model,
+      prompt,
+      max_tokens: maxTokens,
+      stream,
+    };
   }
 
   private async handleStreamingResponse(resp: Response, startTime: number, isAnthropic = false): Promise<StreamingMetrics> {
@@ -809,10 +880,11 @@ async function benchmarkThroughput(
 
 async function benchmarkStreaming(
   client: GatewayClient,
-  protocol?: ProtocolConfig,
+  protocol?: ProtocolCombination,
   errorLogger?: ErrorLogger,
 ): Promise<StreamingResult> {
   const protocolDesc = protocol ? ` (${protocol.description})` : '';
+  const scenarioName = protocol ? `streaming-${protocol.sourceFormat}` : 'streaming';
   console.log(`  Testing streaming: ${client.getName()}${protocolDesc}`);
   
   const messages = [
@@ -859,6 +931,8 @@ async function benchmarkStreaming(
   
   return {
     target: client.getName(),
+    scenario: protocol ? `streaming-${protocol.sourceFormat}` : 'streaming',
+    protocol: protocol?.description,
     timeToFirstTokenMs: mean(results.map(r => r.timeToFirstTokenMs)),
     timeToLastTokenMs: mean(results.map(r => r.timeToLastTokenMs)),
     tokensPerSec: mean(results.map(r => r.tokensPerSec)),
@@ -1085,11 +1159,12 @@ function generateReport(results: BenchmarkResults): string {
   // Streaming section
   if (results.streaming.length > 0) {
     report += `## Streaming Benchmark\n\n`;
-    report += `| Target | TTFT (ms) | TTLT (ms) | Tokens/sec | Chunks | Errors |\n`;
-    report += `|--------|-----------|-----------|------------|--------|--------|\n`;
+    report += `| Target | Protocol | TTFT (ms) | TTLT (ms) | Tokens/sec | Chunks | Errors |\n`;
+    report += `|--------|----------|-----------|-----------|------------|--------|--------|\n`;
     
     for (const r of results.streaming) {
-      report += `| ${r.target} | ${r.timeToFirstTokenMs.toFixed(2)} | ${r.timeToLastTokenMs.toFixed(2)} | ${r.tokensPerSec.toFixed(2)} | ${r.chunkCount} | ${r.errors} |\n`;
+      const proto = r.protocol || 'OpenAI→OpenAI';
+      report += `| ${r.target} | ${proto} | ${r.timeToFirstTokenMs.toFixed(2)} | ${r.timeToLastTokenMs.toFixed(2)} | ${r.tokensPerSec.toFixed(2)} | ${r.chunkCount} | ${r.errors} |\n`;
     }
     
     report += `\n`;
@@ -1496,7 +1571,7 @@ async function main() {
     console.log('⚡ Quick mode enabled\n');
     // In quick mode, only test OpenAI protocol and first 2 scenarios
     config.scenarios = config.scenarios
-      .filter(s => !s.protocol || s.protocol.sourceFormat === 'openai')
+      .filter(s => !s.protocol || s.protocol.sourceFormat === 'openai-chat')
       .slice(0, 2)
       .map(s => ({
         ...s,
@@ -1622,8 +1697,8 @@ async function main() {
       console.log('\n--- Streaming Benchmarks ---\n');
       
       // Get unique protocols from scenarios
-      const protocolsToTest: (ProtocolConfig | undefined)[] = [undefined]; // default OpenAI passthrough
-      const hasAnthropic = config.scenarios.some(s => s.protocol?.sourceFormat === 'anthropic');
+      const protocolsToTest: (ProtocolCombination | undefined)[] = [undefined]; // default OpenAI passthrough
+      const hasAnthropic = config.scenarios.some(s => s.protocol?.sourceFormat === 'anthropic-messages');
       if (hasAnthropic) {
         protocolsToTest.push(PROTOCOL_COMBINATIONS[1]);
       }
