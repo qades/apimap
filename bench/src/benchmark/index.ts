@@ -56,6 +56,12 @@ interface ProtocolConfig {
   description: string;
 }
 
+// Protocol combinations to test
+const PROTOCOL_COMBINATIONS: ProtocolConfig[] = [
+  { sourceFormat: 'openai', endpoint: '/v1/chat/completions', description: 'OpenAI→OpenAI' },
+  { sourceFormat: 'anthropic', endpoint: '/v1/messages', description: 'Anthropic→OpenAI' },
+];
+
 interface LatencyResult {
   target: string;
   scenario: string;
@@ -400,27 +406,52 @@ function parseScenarios(env?: string): ScenarioConfig[] {
   const contextSize = parseInt(Bun.env.BENCHMARK_CONTEXT_SIZE || '0');
   const maxTokens = parseInt(Bun.env.BENCHMARK_MAX_TOKENS || '500');
   
+  // DEFAULT_CONFIG only uses openai protocol (backward compatibility)
+  const testProtocols = [PROTOCOL_COMBINATIONS[0]!];
+  
+  let baseScenarios: Array<{name: string, concurrency: number, requests: number}>;
+  
   if (!env) {
-    return [
-      { name: 'light', concurrency: 1, requests: 50, promptSize, contextSize, maxTokens, useStreaming: false },
-      { name: 'medium', concurrency: 10, requests: 100, promptSize, contextSize, maxTokens, useStreaming: false },
-      { name: 'heavy', concurrency: 50, requests: 200, promptSize, contextSize, maxTokens, useStreaming: false },
-      { name: 'extreme', concurrency: 100, requests: 300, promptSize, contextSize, maxTokens, useStreaming: false },
+    baseScenarios = [
+      { name: 'light', concurrency: 1, requests: 50 },
+      { name: 'medium', concurrency: 10, requests: 100 },
+      { name: 'heavy', concurrency: 50, requests: 200 },
+      { name: 'extreme', concurrency: 100, requests: 300 },
     ];
+  } else {
+    baseScenarios = env.split(',').map((pair, i) => {
+      const [conc, reqs] = pair.split(':');
+      return {
+        name: `scenario-${i + 1}`,
+        concurrency: parseInt(conc),
+        requests: parseInt(reqs),
+      };
+    });
   }
   
-  return env.split(',').map((pair, i) => {
-    const [conc, reqs] = pair.split(':');
-    return {
-      name: `scenario-${i + 1}`,
-      concurrency: parseInt(conc),
-      requests: parseInt(reqs),
-      promptSize,
-      contextSize,
-      maxTokens,
-      useStreaming: false,
-    };
-  });
+  // Create scenarios for each protocol combination
+  const scenarios: ScenarioConfig[] = [];
+  
+  for (const base of baseScenarios) {
+    // Divide requests by number of protocols to keep total benchmark time roughly constant
+    const requestsPerProtocol = Math.max(5, Math.floor(base.requests / testProtocols.length));
+    
+    for (const protocol of testProtocols) {
+      const protocolSuffix = testProtocols.length > 1 ? `-${protocol.sourceFormat}` : '';
+      scenarios.push({
+        name: `${base.name}${protocolSuffix}`,
+        concurrency: base.concurrency,
+        requests: requestsPerProtocol,
+        promptSize,
+        contextSize,
+        maxTokens,
+        useStreaming: false,
+        protocol,
+      });
+    }
+  }
+  
+  return scenarios;
 }
 
 // ============================================================================
@@ -1258,7 +1289,7 @@ SCENARIOS:
 BENCHMARK TYPES:
     --skip-streaming        Skip streaming benchmarks
     --skip-features         Skip feature comparison
-    --protocols MODE        Protocol tests: 'openai' (default), 'anthropic', 'all'
+    --protocols MODE        Protocol tests: 'all' (default), 'openai', 'anthropic'
 
 MOCK SERVER:
     --latency-mean MS       Mean response latency in ms (default: 0)
@@ -1304,12 +1335,6 @@ EXAMPLES:
 // Parse Scenarios from CLI
 // ============================================================================
 
-// Protocol combinations to test
-const PROTOCOL_COMBINATIONS: ProtocolConfig[] = [
-  { sourceFormat: 'openai', endpoint: '/v1/chat/completions', description: 'OpenAI→OpenAI' },
-  { sourceFormat: 'anthropic', endpoint: '/v1/messages', description: 'Anthropic→OpenAI' },
-];
-
 function parseScenarioArgs(
   concurrencyArg?: string,
   requestsArg?: string,
@@ -1330,12 +1355,12 @@ function parseScenarioArgs(
   const contextSize = contextSizeArg ? parseInt(contextSizeArg) : 0;
   const maxTokens = maxTokensArg ? parseInt(maxTokensArg) : 50;
   
-  // Parse protocols to test (default: openai only for baseline comparison)
-  const testProtocols = protocolsArg === 'all' 
-    ? PROTOCOL_COMBINATIONS
+  // Parse protocols to test (default: 'all' for full benchmark)
+  const testProtocols = protocolsArg === 'openai'
+    ? [PROTOCOL_COMBINATIONS[0]!]
     : protocolsArg === 'anthropic'
     ? [PROTOCOL_COMBINATIONS[1]!]
-    : [PROTOCOL_COMBINATIONS[0]!]; // default to openai only
+    : PROTOCOL_COMBINATIONS; // default to all protocols
   
   const scenarios: ScenarioConfig[] = [];
   const maxLen = Math.max(concurrencyLevels.length, requestCounts.length);
@@ -1469,10 +1494,14 @@ async function main() {
   
   if (values['quick']) {
     console.log('⚡ Quick mode enabled\n');
-    config.scenarios = config.scenarios.slice(0, 2).map(s => ({
-      ...s,
-      requests: Math.max(5, Math.floor(s.requests / 5)),
-    }));
+    // In quick mode, only test OpenAI protocol and first 2 scenarios
+    config.scenarios = config.scenarios
+      .filter(s => !s.protocol || s.protocol.sourceFormat === 'openai')
+      .slice(0, 2)
+      .map(s => ({
+        ...s,
+        requests: Math.max(5, Math.floor(s.requests / 5)),
+      }));
   }
 
   // Initialize error logger
