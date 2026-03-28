@@ -195,6 +195,9 @@
                       if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
                         fullContent += parsed.delta.text;
                         streamingContent = fullContent;
+                      } else if (parsed.type === 'content_block_delta' && parsed.delta?.thinking) {
+                        fullReasoning += parsed.delta.thinking;
+                        streamingReasoning = fullReasoning;
                       } else if (parsed.type === 'message_stop') {
                         finishReason = parsed.stop_reason || 'end_turn';
                       } else if (parsed.type === 'message_delta' && parsed.usage) {
@@ -216,6 +219,11 @@
                       if (text) {
                         fullContent += text;
                         streamingContent = fullContent;
+                      }
+                      const reasoning = parsed.choices?.[0]?.reasoning_content;
+                      if (reasoning) {
+                        fullReasoning += reasoning;
+                        streamingReasoning = fullReasoning;
                       }
                       if (parsed.choices?.[0]?.finish_reason) {
                         finishReason = parsed.choices[0].finish_reason;

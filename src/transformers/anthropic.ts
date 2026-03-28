@@ -57,6 +57,16 @@ function anthropicContentToInternal(block: AnthropicContentBlock): InternalConte
         text: block.text,
         cacheControl: block.cache_control?.type === "ephemeral" ? "ephemeral" : undefined,
       };
+    case "thinking":
+      return {
+        type: "thinking",
+        text: block.thinking,
+      };
+    case "redacted_thinking":
+      return {
+        type: "thinking",
+        text: "[redacted thinking]",
+      };
     case "image":
       return {
         type: "image",
@@ -123,8 +133,11 @@ function internalContentToAnthropic(block: InternalContentBlock): AnthropicConte
         is_error: block.toolResult?.isError,
       };
     case "thinking":
-      // Anthropic doesn't have explicit thinking blocks in API yet
-      return { type: "text", text: "" };
+      return {
+        type: "thinking",
+        thinking: block.text || "",
+        signature: "",
+      };
     default:
       return { type: "text", text: "" };
   }
@@ -418,6 +431,14 @@ export function parseAnthropicStreamEvent(line: string): InternalStreamChunk | n
             index: event.index || 0,
             delta: { type: "text", text: event.delta.text },
           };
+        } else if (event.delta?.type === "thinking_delta") {
+          return {
+            index: event.index || 0,
+            delta: { type: "thinking", text: event.delta.thinking },
+          };
+        } else if (event.delta?.type === "signature_delta") {
+          // Signature deltas don't contain thinking text, ignore for now
+          return null;
         } else if (event.delta?.type === "input_json_delta") {
           return {
             index: event.index || 0,
@@ -481,6 +502,13 @@ export function toAnthropicStreamChunk(chunk: InternalStreamChunk): string {
     return createAnthropicStreamEvent("content_block_delta", {
       index,
       delta: { type: "text_delta", text: chunk.delta.text || "" },
+    });
+  }
+
+  if (chunk.delta.type === "thinking") {
+    return createAnthropicStreamEvent("content_block_delta", {
+      index,
+      delta: { type: "thinking_delta", thinking: chunk.delta.text || "" },
     });
   }
 

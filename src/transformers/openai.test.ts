@@ -7,8 +7,10 @@ import {
   parseOpenAIStreamChunk,
   toOpenAIStreamChunk,
   parseOpenAICompletionRequest,
+  parseOpenAICompletionStreamChunk,
   parseOpenAIResponsesRequest,
   toOpenAICompletionResponse,
+  toOpenAICompletionStreamChunk,
   toOpenAIResponsesResponse,
 } from "./openai.ts";
 import type { OpenAIRequest, OpenAIResponse } from "../types/index.ts";
@@ -492,6 +494,76 @@ describe("OpenAI Transformer", () => {
       });
 
       expect(lengthResponse.choices[0].finish_reason).toBe("length");
+    });
+  });
+
+  describe("parseOpenAICompletionStreamChunk", () => {
+    test("should parse completions stream chunk with text", () => {
+      const chunk = parseOpenAICompletionStreamChunk({
+        id: "cmpl-test",
+        object: "text_completion.chunk",
+        created: 1234567890,
+        model: "gpt-3.5-turbo-instruct",
+        choices: [
+          {
+            text: "Hello",
+            index: 0,
+            finish_reason: null,
+          },
+        ],
+      });
+
+      expect(chunk).not.toBeNull();
+      expect(chunk?.delta.type).toBe("text");
+      expect(chunk?.delta.text).toBe("Hello");
+    });
+
+    test("should parse completions stream chunk with reasoning_content", () => {
+      const chunk = parseOpenAICompletionStreamChunk({
+        id: "cmpl-test",
+        object: "text_completion.chunk",
+        created: 1234567890,
+        model: "gpt-3.5-turbo-instruct",
+        choices: [
+          {
+            text: "",
+            index: 0,
+            finish_reason: null,
+            reasoning_content: "Thinking...",
+          },
+        ],
+      });
+
+      expect(chunk).not.toBeNull();
+      expect(chunk?.reasoningContent).toBe("Thinking...");
+    });
+  });
+
+  describe("toOpenAICompletionStreamChunk", () => {
+    test("should convert completions chunk to SSE format", () => {
+      const chunk = {
+        index: 0,
+        delta: { type: "text" as const, text: "Hello" },
+      };
+
+      const sse = toOpenAICompletionStreamChunk(chunk, "gpt-3.5-turbo-instruct");
+
+      expect(sse).toContain("data:");
+      expect(sse).toContain("Hello");
+      expect(sse).toContain("text_completion.chunk");
+    });
+
+    test("should include reasoning_content in completions SSE format", () => {
+      const chunk = {
+        index: 0,
+        delta: { type: "text" as const, text: "" },
+        reasoningContent: "Thinking step by step...",
+      };
+
+      const sse = toOpenAICompletionStreamChunk(chunk, "gpt-3.5-turbo-instruct");
+
+      expect(sse).toContain("reasoning_content");
+      expect(sse).toContain("Thinking step by step");
     });
   });
 

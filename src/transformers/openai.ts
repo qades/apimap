@@ -1198,6 +1198,7 @@ export function parseOpenAICompletionStreamChunk(data: Record<string, unknown>):
 
   const index = (choice.index as number) || 0;
   const text = choice.text as string | undefined;
+  const reasoningContent = choice.reasoning_content as string | undefined;
 
   // Get finish reason
   const finishReason = choice.finish_reason as string | null;
@@ -1208,6 +1209,7 @@ export function parseOpenAICompletionStreamChunk(data: Record<string, unknown>):
     delta: { type: "text", text: text || "" },
     finishReason,
     isComplete,
+    reasoningContent,
   };
 }
 
@@ -1226,6 +1228,10 @@ export function toOpenAICompletionStreamChunk(chunk: InternalStreamChunk, model:
       finish_reason: chunk.finishReason ?? null,
     }],
   };
+
+  if (chunk.reasoningContent) {
+    (data.choices as Array<Record<string, unknown>>)[0].reasoning_content = chunk.reasoningContent;
+  }
 
   return `data: ${JSON.stringify(data)}\n\n`;
 }

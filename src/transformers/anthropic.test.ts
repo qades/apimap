@@ -268,6 +268,70 @@ describe("Anthropic Transformer", () => {
       expect(anthropicResp.role).toBe("assistant");
       expect(anthropicResp.stop_reason).toBe("end_turn");
     });
+
+    test("should map thinking content to Anthropic thinking blocks", () => {
+      const internal = {
+        id: "msg-123",
+        model: "claude-3-opus",
+        content: [
+          { type: "thinking" as const, text: "Let me reason..." },
+          { type: "text" as const, text: "Final answer" },
+        ],
+        stopReason: "end_turn" as const,
+      };
+
+      const anthropicResp = toAnthropicResponse(internal);
+
+      expect(anthropicResp.content).toHaveLength(2);
+      expect(anthropicResp.content[0]).toEqual({ type: "thinking", thinking: "Let me reason...", signature: "" });
+      expect(anthropicResp.content[1]).toEqual({ type: "text", text: "Final answer" });
+    });
+  });
+
+  describe("parseAnthropicResponse", () => {
+    test("should parse thinking blocks from Anthropic response", () => {
+      const anthropicResp: AnthropicResponse = {
+        id: "msg-123",
+        type: "message",
+        role: "assistant",
+        model: "claude-3-opus",
+        content: [
+          { type: "thinking", thinking: "Let me think...", signature: "sig123" },
+          { type: "text", text: "Hello there!" },
+        ],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: { input_tokens: 10, output_tokens: 5 },
+      };
+
+      const internal = parseAnthropicResponse(anthropicResp);
+
+      expect(internal.content).toHaveLength(2);
+      expect(internal.content[0]).toEqual({ type: "thinking", text: "Let me think..." });
+      expect(internal.content[1]).toEqual({ type: "text", text: "Hello there!" });
+    });
+
+    test("should parse redacted thinking blocks", () => {
+      const anthropicResp: AnthropicResponse = {
+        id: "msg-123",
+        type: "message",
+        role: "assistant",
+        model: "claude-3-opus",
+        content: [
+          { type: "redacted_thinking", data: "redacted-data" },
+          { type: "text", text: "Hello there!" },
+        ],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: { input_tokens: 10, output_tokens: 5 },
+      };
+
+      const internal = parseAnthropicResponse(anthropicResp);
+
+      expect(internal.content).toHaveLength(2);
+      expect(internal.content[0]).toEqual({ type: "thinking", text: "[redacted thinking]" });
+      expect(internal.content[1]).toEqual({ type: "text", text: "Hello there!" });
+    });
   });
 
   describe("parseAnthropicStreamEvent", () => {
@@ -285,6 +349,20 @@ describe("Anthropic Transformer", () => {
       expect(event?.isComplete).toBe(true);
       expect(event?.finishReason).toBe("end_turn");
       expect(event?.usage?.completionTokens).toBe(50);
+    });
+
+    test("should parse thinking_delta event", () => {
+      const event = parseAnthropicStreamEvent('data: {"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"Let me think..."}}');
+
+      expect(event).not.toBeNull();
+      expect(event?.delta.type).toBe("thinking");
+      expect(event?.delta.text).toBe("Let me think...");
+    });
+
+    test("should ignore signature_delta event", () => {
+      const event = parseAnthropicStreamEvent('data: {"type":"content_block_delta","index":1,"delta":{"type":"signature_delta","signature":"sig123"}}');
+
+      expect(event).toBeNull();
     });
 
     test("should parse [DONE] event", () => {
@@ -324,6 +402,19 @@ describe("Anthropic Transformer", () => {
 
       expect(sse).toContain("message_delta");
       expect(sse).toContain("end_turn");
+    });
+
+    test("should convert thinking chunk to thinking_delta SSE", () => {
+      const chunk = {
+        index: 0,
+        delta: { type: "thinking" as const, text: "Let me think..." },
+      };
+
+      const sse = toAnthropicStreamChunk(chunk);
+
+      expect(sse).toContain("content_block_delta");
+      expect(sse).toContain("thinking_delta");
+      expect(sse).toContain("Let me think...");
     });
   });
 

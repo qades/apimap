@@ -535,22 +535,6 @@ async function handleRequest(
     if (body.stream && provider.supportsStreaming()) {
       // Always transform through internal format - no passthrough
       // (Required for API key injection, model mapping, MCP, etc.)
-          response,
-          logEntry,
-          startTime,
-          requestId
-        );
-        return new Response(stream, {
-          headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            ...getCORSHeaders(req.headers.get("origin"), config),
-          },
-        });
-      }
-
-      // Transformation mode: parse and convert between formats
       const stream = await createStreamingResponse(
         response,
         scheme.format as transformers.ProviderFormat,
@@ -560,7 +544,6 @@ async function handleRequest(
         startTime,
         requestId
       );
-
       return new Response(stream, {
         headers: {
           "Content-Type": "text/event-stream",
@@ -1022,7 +1005,7 @@ async function createStreamingResponse(
       }
 
       // Store the full concatenated response instead of just streaming metadata
-      logEntry.responseBody = fullContent || { type: "streaming", chunkCount: chunkIndex };
+      logEntry.responseBody = fullContent || fullReasoningContent || { type: "streaming", chunkCount: chunkIndex };
       logEntry.durationMs = Date.now() - startTime;
       state.logging.log(logEntry).catch(console.error);
       
@@ -1070,7 +1053,7 @@ async function createStreamingResponse(
       
       // Update log entry with info - include full content if available
       logEntry.error = isClientDisconnect ? undefined : errorMessage;
-      logEntry.responseBody = fullContent || { type: "streaming", chunkCount: chunkIndex, aborted: true };
+      logEntry.responseBody = fullContent || fullReasoningContent || { type: "streaming", chunkCount: chunkIndex, aborted: true };
       logEntry.durationMs = Date.now() - startTime;
       state.logging.log(logEntry).catch(console.error);
       
