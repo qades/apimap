@@ -47,6 +47,13 @@ interface ScenarioConfig {
   contextSize: number;
   maxTokens: number;
   useStreaming: boolean;
+  protocol?: ProtocolConfig;
+}
+
+interface ProtocolConfig {
+  sourceFormat: 'openai' | 'anthropic';
+  endpoint: string;
+  description: string;
 }
 
 interface LatencyResult {
@@ -391,7 +398,7 @@ const DEFAULT_CONFIG: BenchmarkConfig = {
 function parseScenarios(env?: string): ScenarioConfig[] {
   const promptSize = parseInt(Bun.env.BENCHMARK_PROMPT_SIZE || '100');
   const contextSize = parseInt(Bun.env.BENCHMARK_CONTEXT_SIZE || '0');
-  const maxTokens = parseInt(Bun.env.BENCHMARK_MAX_TOKENS || '50');
+  const maxTokens = parseInt(Bun.env.BENCHMARK_MAX_TOKENS || '500');
   
   if (!env) {
     return [
@@ -474,22 +481,33 @@ class GatewayClient {
     messages: Array<{role: string, content: string}>,
     maxTokens: number,
     stream: boolean,
+    protocol?: ProtocolConfig,
   ): Promise<{ latencyMs: number; success: boolean; tokens?: number; streamingMetrics?: StreamingMetrics }> {
     const start = performance.now();
     
+    // Determine endpoint and request format based on protocol
+    const endpoint = protocol?.endpoint || '/v1/chat/completions';
+    const isAnthropic = endpoint === '/v1/messages';
+    
     try {
-      const resp = await fetch(`${this.url}/v1/chat/completions`, {
+      const body = isAnthropic 
+        ? this.buildAnthropicBody(model, messages, maxTokens, stream)
+        : this.buildOpenAIBody(model, messages, maxTokens, stream);
+        
+      const headers: Record<string, string> = {
+        'Authorization': `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+      };
+      
+      // Anthropic requires API version header
+      if (isAnthropic) {
+        headers['anthropic-version'] = '2023-06-01';
+      }
+      
+      const resp = await fetch(`${this.url}${endpoint}`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          max_tokens: maxTokens,
-          stream,
-        }),
+        headers,
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(30000),
       });
 
@@ -501,12 +519,13 @@ class GatewayClient {
           model,
           maxTokens,
           stream,
+          endpoint,
         });
         return { latencyMs, success: false };
       }
 
       if (stream) {
-        const streamingMetrics = await this.handleStreamingResponse(resp, start);
+        const streamingMetrics = await this.handleStreamingResponse(resp, start, isAnthropic);
         return { latencyMs: performance.now() - start, success: true, streamingMetrics };
       } else {
         await resp.text();
@@ -518,12 +537,57 @@ class GatewayClient {
         model,
         maxTokens,
         stream,
+        endpoint,
       });
       return { latencyMs, success: false };
     }
   }
+  
+  private buildOpenAIBody(
+    model: string,
+    messages: Array<{role: string, content: string}>,
+    maxTokens: number,
+    stream: boolean,
+  ): Record<string, unknown> {
+    return {
+      model,
+      messages,
+      max_tokens: maxTokens,
+      stream,
+    };
+  }
+  
+  private buildAnthropicBody(
+    model: string,
+    messages: Array<{role: string, content: string}>,
+    maxTokens: number,
+    stream: boolean,
+  ): Record<string, unknown> {
+    // Convert messages to Anthropic format (no system role in messages)
+    const anthropicMessages = messages
+      .filter(m => m.role !== 'system')
+      .map(m => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content,
+      }));
+      
+    // Extract system message if present
+    const systemMessage = messages.find(m => m.role === 'system');
+    const body: Record<string, unknown> = {
+      model,
+      messages: anthropicMessages,
+      max_tokens: maxTokens,
+      stream,
+    };
+    
+    if (systemMessage) {
+      body.system = systemMessage.content;
+    }
+    
+    return body;
+  }
 
-  private async handleStreamingResponse(resp: Response, startTime: number): Promise<StreamingMetrics> {
+  private async handleStreamingResponse(resp: Response, startTime: number, isAnthropic = false): Promise<StreamingMetrics> {
     const reader = resp.body?.getReader();
     if (!reader) {
       throw new Error('No response body');
@@ -559,9 +623,15 @@ class GatewayClient {
 
           try {
             const data = JSON.parse(line.slice(6));
+            
+            // Handle OpenAI format
             if (data.choices?.[0]?.delta?.content) {
-              // Rough token count: words ≈ tokens
               totalTokens += data.choices[0].delta.content.split(/\s+/).length;
+            }
+            
+            // Handle Anthropic format
+            if (data.type === 'content_block_delta' && data.delta?.text) {
+              totalTokens += data.delta.text.split(/\s+/).length;
             }
           } catch {
             // Ignore parse errors
@@ -619,7 +689,8 @@ async function benchmarkLatency(
   scenario: ScenarioConfig,
   errorLogger?: ErrorLogger,
 ): Promise<LatencyResult> {
-  console.log(`  Testing latency: ${client.getName()} - ${scenario.name} (${scenario.requests} requests)`);
+  const protocolDesc = scenario.protocol ? ` (${scenario.protocol.description})` : '';
+  console.log(`  Testing latency: ${client.getName()} - ${scenario.name}${protocolDesc} (${scenario.requests} requests)`);
   
   const prompt = generatePrompt(scenario.promptSize);
   const context = generateContext(scenario.contextSize);
@@ -634,6 +705,7 @@ async function benchmarkLatency(
       messages,
       scenario.maxTokens,
       scenario.useStreaming,
+      scenario.protocol,
     );
     
     if (result.success) {
@@ -657,7 +729,8 @@ async function benchmarkThroughput(
   scenario: ScenarioConfig,
   errorLogger?: ErrorLogger,
 ): Promise<ThroughputResult> {
-  console.log(`  Testing throughput: ${client.getName()} - ${scenario.name} (${scenario.concurrency} concurrent)`);
+  const protocolDesc = scenario.protocol ? ` (${scenario.protocol.description})` : '';
+  console.log(`  Testing throughput: ${client.getName()} - ${scenario.name}${protocolDesc} (${scenario.concurrency} concurrent)`);
   
   const prompt = generatePrompt(scenario.promptSize);
   const context = generateContext(scenario.contextSize);
@@ -677,6 +750,7 @@ async function benchmarkThroughput(
         messages,
         scenario.maxTokens,
         scenario.useStreaming,
+        scenario.protocol,
       );
       
       if (result.success) {
@@ -704,9 +778,11 @@ async function benchmarkThroughput(
 
 async function benchmarkStreaming(
   client: GatewayClient,
+  protocol?: ProtocolConfig,
   errorLogger?: ErrorLogger,
 ): Promise<StreamingResult> {
-  console.log(`  Testing streaming: ${client.getName()}`);
+  const protocolDesc = protocol ? ` (${protocol.description})` : '';
+  console.log(`  Testing streaming: ${client.getName()}${protocolDesc}`);
   
   const messages = [
     { role: 'system' as const, content: 'You are a helpful assistant.' },
@@ -721,8 +797,9 @@ async function benchmarkStreaming(
       const result = await client.chatCompletion(
         'gpt-4o-mini',
         messages,
-        150,
+        1000,
         true,
+        protocol,
       );
       
       if (result.success && result.streamingMetrics) {
@@ -1181,6 +1258,7 @@ SCENARIOS:
 BENCHMARK TYPES:
     --skip-streaming        Skip streaming benchmarks
     --skip-features         Skip feature comparison
+    --protocols MODE        Protocol tests: 'openai' (default), 'anthropic', 'all'
 
 MOCK SERVER:
     --latency-mean MS       Mean response latency in ms (default: 0)
@@ -1226,12 +1304,19 @@ EXAMPLES:
 // Parse Scenarios from CLI
 // ============================================================================
 
+// Protocol combinations to test
+const PROTOCOL_COMBINATIONS: ProtocolConfig[] = [
+  { sourceFormat: 'openai', endpoint: '/v1/chat/completions', description: 'OpenAI→OpenAI' },
+  { sourceFormat: 'anthropic', endpoint: '/v1/messages', description: 'Anthropic→OpenAI' },
+];
+
 function parseScenarioArgs(
   concurrencyArg?: string,
   requestsArg?: string,
   promptSizeArg?: string,
   contextSizeArg?: string,
   maxTokensArg?: string,
+  protocolsArg?: string,
 ): ScenarioConfig[] {
   const concurrencyLevels = concurrencyArg 
     ? concurrencyArg.split(',').map(c => parseInt(c.trim()))
@@ -1245,22 +1330,35 @@ function parseScenarioArgs(
   const contextSize = contextSizeArg ? parseInt(contextSizeArg) : 0;
   const maxTokens = maxTokensArg ? parseInt(maxTokensArg) : 50;
   
+  // Parse protocols to test (default: openai only for baseline comparison)
+  const testProtocols = protocolsArg === 'all' 
+    ? PROTOCOL_COMBINATIONS
+    : protocolsArg === 'anthropic'
+    ? [PROTOCOL_COMBINATIONS[1]!]
+    : [PROTOCOL_COMBINATIONS[0]!]; // default to openai only
+  
   const scenarios: ScenarioConfig[] = [];
   const maxLen = Math.max(concurrencyLevels.length, requestCounts.length);
   
   for (let i = 0; i < maxLen; i++) {
     const concurrency = concurrencyLevels[i] ?? concurrencyLevels[concurrencyLevels.length - 1];
-    const requests = requestCounts[i] ?? requestCounts[requestCounts.length - 1];
+    // Divide requests by number of protocols to keep total benchmark time roughly constant
+    const baseRequests = requestCounts[i] ?? requestCounts[requestCounts.length - 1];
+    const requests = Math.max(5, Math.floor(baseRequests / testProtocols.length));
     
-    scenarios.push({
-      name: `scenario-${i + 1}`,
-      concurrency,
-      requests,
-      promptSize,
-      contextSize,
-      maxTokens,
-      useStreaming: false,
-    });
+    for (const protocol of testProtocols) {
+      const protocolSuffix = testProtocols.length > 1 ? `-${protocol.sourceFormat}` : '';
+      scenarios.push({
+        name: `scenario-${i + 1}${protocolSuffix}`,
+        concurrency,
+        requests,
+        promptSize,
+        contextSize,
+        maxTokens,
+        useStreaming: false,
+        protocol,
+      });
+    }
   }
   
   return scenarios;
@@ -1292,6 +1390,7 @@ async function main() {
       'run-id': { type: 'string' },
       'skip-streaming': { type: 'boolean' },
       'skip-features': { type: 'boolean' },
+      'protocols': { type: 'string' },
       'no-error-log': { type: 'boolean' },
       'keep-services': { type: 'boolean' },
       'help': { type: 'boolean', short: 'h' },
@@ -1365,6 +1464,7 @@ async function main() {
     values['prompt-size'] as string | undefined,
     values['context-size'] as string | undefined,
     values['max-tokens'] as string | undefined,
+    values['protocols'] as string | undefined,
   );
   
   if (values['quick']) {
@@ -1384,13 +1484,17 @@ async function main() {
   // Track whether we should keep services running
   const keepServices = values['keep-services'] as boolean || false;
 
+  const protocolsTested = [...new Set(config.scenarios.map(s => s.protocol?.description || 'OpenAI→OpenAI'))];
+  
   console.log('Configuration:');
   console.log(`  LiteLLM: ${config.targets[0].url} ${config.targets[0].enabled ? '' : '(skipped)'}`);
   console.log(`  API Map: ${config.targets[1].url} ${config.targets[1].enabled ? '' : '(skipped)'}`);
   console.log(`  Direct:  ${config.targets[2].url} ${config.targets[2].enabled ? '' : '(skipped)'}`);
+  console.log(`  Protocols: ${protocolsTested.join(', ')}`);
   console.log(`  Scenarios (${config.scenarios.length}):`);
   config.scenarios.forEach(s => {
-    console.log(`    - ${s.name}: ${s.concurrency} concurrent, ${s.requests} requests, ${s.promptSize} char prompt`);
+    const proto = s.protocol ? ` [${s.protocol.description}]` : '';
+    console.log(`    - ${s.name}: ${s.concurrency} concurrent, ${s.requests} requests${proto}`);
   });
   console.log(`  Context size: ${config.scenarios[0]?.contextSize || 0} chars`);
   console.log(`  Max tokens: ${config.scenarios[0]?.maxTokens || 50}`);
@@ -1484,16 +1588,26 @@ async function main() {
       }
     }
 
-    // Streaming benchmarks
+    // Streaming benchmarks - test all protocol combinations
     if (config.testStreaming) {
       console.log('\n--- Streaming Benchmarks ---\n');
       
+      // Get unique protocols from scenarios
+      const protocolsToTest: (ProtocolConfig | undefined)[] = [undefined]; // default OpenAI passthrough
+      const hasAnthropic = config.scenarios.some(s => s.protocol?.sourceFormat === 'anthropic');
+      if (hasAnthropic) {
+        protocolsToTest.push(PROTOCOL_COMBINATIONS[1]);
+      }
+      
       for (const client of clients) {
-        const streamingResult = await benchmarkStreaming(client, errorLogger);
-        results.streaming.push(streamingResult);
-        
-        console.log(`  ${client.getName()}: TTFT=${streamingResult.timeToFirstTokenMs.toFixed(1)}ms, ` +
-                    `Tokens/sec=${streamingResult.tokensPerSec.toFixed(1)}`);
+        for (const protocol of protocolsToTest) {
+          const streamingResult = await benchmarkStreaming(client, protocol, errorLogger);
+          results.streaming.push(streamingResult);
+          
+          const protocolName = protocol ? ` (${protocol.description})` : '';
+          console.log(`  ${client.getName()}${protocolName}: TTFT=${streamingResult.timeToFirstTokenMs.toFixed(1)}ms, ` +
+                      `Tokens/sec=${streamingResult.tokensPerSec.toFixed(1)}`);
+        }
       }
     }
 

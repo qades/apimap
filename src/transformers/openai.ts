@@ -1161,6 +1161,20 @@ export function toOpenAIStreamChunk(chunk: InternalStreamChunk, model: string): 
 }
 
 /**
+ * Create raw SSE line from original data (for transparent passthrough)
+ */
+export function createOpenAIRawStreamLine(originalLine: string): string {
+  // Pass through unchanged - just ensure proper line ending
+  if (originalLine.endsWith('\n\n')) {
+    return originalLine;
+  }
+  if (originalLine.endsWith('\n')) {
+    return originalLine + '\n';
+  }
+  return originalLine + '\n\n';
+}
+
+/**
  * Parse OpenAI legacy completions streaming chunk to internal format
  * Completions API uses "text" field instead of "delta.content"
  */

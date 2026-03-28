@@ -532,6 +532,28 @@ async function handleRequest(
 
     // Handle streaming
     if (body.stream && provider.supportsStreaming()) {
+      // Use transparent passthrough when formats match (no transformation needed)
+      const needsTransformation = scheme.format !== targetFormat;
+      
+      if (!needsTransformation) {
+        // Passthrough mode: don't parse/reconstruct, just forward raw SSE
+        const stream = await createPassthroughStream(
+          response,
+          logEntry,
+          startTime,
+          requestId
+        );
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            ...getCORSHeaders(req.headers.get("origin"), config),
+          },
+        });
+      }
+
+      // Transformation mode: parse and convert between formats
       const stream = await createStreamingResponse(
         response,
         scheme.format as transformers.ProviderFormat,
@@ -763,6 +785,92 @@ async function handleAnthropicPassthrough(
       req.headers.get("origin")
     );
   }
+}
+
+async function createPassthroughStream(
+  response: Response,
+  logEntry: LogEntry,
+  startTime: number,
+  requestId?: string
+): Promise<ReadableStream<Uint8Array>> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("No response body");
+  }
+
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const writer = writable.getWriter();
+
+  // Update status to streaming
+  if (requestId) {
+    updateRequest(requestId, { status: 'streaming' });
+  }
+
+  // Forward data without modification
+  (async () => {
+    let chunkCount = 0;
+    let fullContent = "";
+    const decoder = new TextDecoder();
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        chunkCount++;
+        
+        // Try to extract content for monitoring (best effort, don't fail on errors)
+        try {
+          const text = decoder.decode(value, { stream: true });
+          const lines = text.split("\n");
+          for (const line of lines) {
+            if (line.startsWith("data: ") && line !== "data: [DONE]") {
+              const data = JSON.parse(line.slice(6));
+              if (data.choices?.[0]?.delta?.content) {
+                fullContent += data.choices[0].delta.content;
+              }
+            }
+          }
+        } catch {
+          // Ignore parse errors - we're in passthrough mode
+        }
+
+        await writer.write(value);
+      }
+
+      // Update log entry
+      logEntry.responseBody = fullContent || { type: "streaming", chunkCount };
+      logEntry.durationMs = Date.now() - startTime;
+      state.logging.log(logEntry).catch(console.error);
+
+      // Mark as completed
+      if (requestId) {
+        updateRequest(requestId, { 
+          status: 'completed', 
+          content: fullContent || undefined,
+          chunks: chunkCount,
+          endTime: Date.now() 
+        });
+        cleanupOldRequests();
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logEntry.error = errorMessage;
+      logEntry.responseBody = fullContent || { type: "streaming", chunkCount, aborted: true };
+      logEntry.durationMs = Date.now() - startTime;
+      state.logging.log(logEntry).catch(console.error);
+
+      if (requestId) {
+        updateRequest(requestId, { status: 'error', error: errorMessage, endTime: Date.now() });
+        cleanupOldRequests();
+      }
+    } finally {
+      reader.cancel().catch(() => {});
+      await writer.close().catch(() => {});
+    }
+  })();
+
+  return readable;
 }
 
 async function createStreamingResponse(

@@ -478,14 +478,14 @@ function validateGenericRequest(body: Record<string, unknown>): ValidationResult
 
 const sampleResponses = {
   openai: [
-    "This is a mock response from the OpenAI-compatible endpoint.",
-    "Processing your request with simulated OpenAI capabilities.",
-    "Mock LLM output for OpenAI-style benchmarking.",
+    "Artificial intelligence represents one of the most transformative technologies of our era. Machine learning systems can now process natural language with remarkable sophistication. These models learn patterns from vast amounts of text data, enabling them to generate coherent and contextually appropriate responses. The underlying neural networks use attention mechanisms to weigh the importance of different input tokens. As these systems scale, they demonstrate emergent capabilities that weren't explicitly programmed. Researchers continue to push the boundaries of what's possible with large language models.",
+    "The development of transformer architectures revolutionized natural language processing. Unlike recurrent neural networks, transformers can process all tokens in parallel, dramatically speeding up training. The self-attention mechanism allows the model to capture long-range dependencies in text. This innovation enabled the creation of models with billions of parameters. Such scale requires sophisticated distributed training techniques and significant computational resources. The results, however, demonstrate unprecedented capabilities in understanding and generating human language.",
+    "Modern AI systems employ reinforcement learning from human feedback to align their outputs with human preferences. This training methodology helps models become more helpful, harmless, and honest. The process involves collecting comparisons between different model outputs and training a reward model. The language model is then fine-tuned to maximize the predicted human preference scores. Iterative refinement through this process leads to significant improvements in model behavior. However, challenges remain in ensuring robust alignment across diverse contexts and applications.",
   ],
   anthropic: [
-    "This is a mock response from the Anthropic endpoint.",
-    "Processing your request with simulated Claude capabilities.",
-    "Mock LLM output for Anthropic-style benchmarking.",
+    "Claude is designed to be helpful, harmless, and honest through constitutional AI principles. The training process emphasizes safety and beneficial interactions with users. Constitutional AI uses a set of principles to guide the model's behavior. These principles help the model navigate complex ethical considerations and potential edge cases. The approach has shown promising results in reducing harmful outputs while maintaining helpful capabilities. Ongoing research aims to improve these safety techniques further.",
+    "The field of AI safety encompasses multiple important research directions. Interpretability research seeks to understand the internal mechanisms of neural networks. Robustness research focuses on ensuring models behave reliably across different situations. Alignment research addresses the challenge of ensuring AI systems pursue intended goals. These areas are crucial as AI systems become more powerful and widely deployed. Collaboration between researchers, policymakers, and industry is essential for responsible development.",
+    "Large language models demonstrate impressive few-shot learning capabilities. Given just a few examples, they can adapt to new tasks without explicit fine-tuning. This flexibility emerges from pre-training on diverse internet text. The models learn to recognize patterns and relationships that transfer across domains. Prompt engineering has become an important skill for eliciting desired behaviors. Techniques like chain-of-thought prompting further enhance reasoning capabilities.",
   ],
   gemini: [
     "This is a mock response from the Gemini endpoint.",
