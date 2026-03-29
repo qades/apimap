@@ -181,6 +181,9 @@ jobs:
         MOCK_SERVER_URL=http://mock-server:9999
         EOF
         
+        # Unset host-side MOCK_SERVER_URL so docker-compose uses the .env file value
+        unset MOCK_SERVER_URL
+        
         # Start all services in background using the CI image
         docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d mock-server litellm apimap
         
@@ -223,12 +226,11 @@ jobs:
         echo ""
         
         # Run the FULL benchmark
-        bun run src/benchmark/index.ts
+        MOCK_SERVER_URL=http://localhost:9999 bun run src/benchmark/index.ts
       env:
         APIMAP_IMAGE: apibench-apimap:dev
         LITELLM_URL: http://localhost:4000
         APIMAP_URL: http://localhost:3000
-        MOCK_SERVER_URL: http://localhost:9999
 
     - name: Cleanup services
       if: always()
@@ -309,6 +311,9 @@ jobs:
         MOCK_SERVER_URL=http://mock-server:9999
         EOF
         
+        # Unset host-side MOCK_SERVER_URL so docker-compose uses the .env file value
+        unset MOCK_SERVER_URL
+        
         # Start all services in background (use CI override, image is already tagged)
         docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d mock-server litellm apimap
         
@@ -351,12 +356,11 @@ jobs:
         echo ""
         
         # Run the quick benchmark
-        bun run src/benchmark/index.ts --quick
+        MOCK_SERVER_URL=http://localhost:9999 bun run src/benchmark/index.ts --quick
       env:
         APIMAP_IMAGE: apimap:benchmark-test
         LITELLM_URL: http://localhost:4000
         APIMAP_URL: http://localhost:3000
-        MOCK_SERVER_URL: http://localhost:9999
         BENCHMARK_WARMUP: 3
         BENCHMARK_SCENARIOS: "1:30,10:60"
 
@@ -475,6 +479,9 @@ jobs:
         MOCK_SERVER_URL=http://mock-server:9999
         EOF
         
+        # Unset host-side MOCK_SERVER_URL so docker-compose uses the .env file value
+        unset MOCK_SERVER_URL
+        
         # Start all services in background
         docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d mock-server litellm apimap
         
@@ -517,12 +524,11 @@ jobs:
         echo ""
         
         # Run the FULL benchmark
-        bun run src/benchmark/index.ts
+        MOCK_SERVER_URL=http://localhost:9999 bun run src/benchmark/index.ts
       env:
         APIMAP_IMAGE: apimap:benchmark-test
         LITELLM_URL: http://localhost:4000
         APIMAP_URL: http://localhost:3000
-        MOCK_SERVER_URL: http://localhost:9999
 
     - name: Cleanup services
       if: always()
