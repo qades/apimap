@@ -388,7 +388,11 @@ def create_summary_page(pdf, data: dict, all_keys: list):
 
 
 def create_streaming_summary_page(pdf, streaming_data: list):
-    """Create a streaming performance summary page with scatter plots showing distribution and outliers."""
+    """Create a streaming performance summary page with scatter plots showing distribution and outliers.
+    
+    Axes flipped: Metric on X-axis, Protocol+Target on Y-axis.
+    Grouped by: Source Protocol, then Contender (Target).
+    """
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
     fig.suptitle('Streaming Performance Analysis', fontsize=16, fontweight='bold', y=0.98)
     
@@ -400,59 +404,72 @@ def create_streaming_summary_page(pdf, streaming_data: list):
             by_protocol[protocol] = []
         by_protocol[protocol].append(r)
     
+    # Group by source protocol first, then contender (target)
     protocols = sorted(by_protocol.keys())
     targets = sorted(set(r['target'] for r in streaming_data))
     
+    # Build Y-axis positions: group by protocol, then target within each protocol
+    y_positions = {}  # (protocol, target) -> y_position
+    y_labels = []  # Labels for Y-axis ticks
+    box_labels = []  # Labels for box plot
+    box_colors = []  # Colors for box plot
+    y_pos = 0
+    
+    for protocol in protocols:
+        for target in targets:
+            y_positions[(protocol, target)] = y_pos
+            y_labels.append(f"{protocol} | {target}")
+            box_labels.append(f"{protocol} | {target}")
+            target_idx = targets.index(target)
+            box_colors.append(TARGET_COLORS[target_idx % len(TARGET_COLORS)])
+            y_pos += 1
+    
     # --- Left plot: Scatter plot of individual runs (tokens/sec) ---
+    # With FLIPPED axes: X = tokens/sec, Y = protocol+target position
     all_tokens_per_sec = []
-    positions = []
-    labels = []
+    y_positions_scatter = []
     colors = []
     
-    pos = 0
     for protocol in protocols:
         for target in targets:
             results = [r for r in by_protocol[protocol] if r['target'] == target]
+            y_base = y_positions[(protocol, target)]
             for r in results:
                 runs = r.get('runs', [])
                 if not runs:
-                    # Fallback to aggregate if no individual runs
                     runs = [{'tokensPerSec': r['tokensPerSec']}]
                 
                 for run in runs:
                     all_tokens_per_sec.append(run['tokensPerSec'])
-                    positions.append(pos)
-                    labels.append(f"{target}\n{protocol}")
+                    y_positions_scatter.append(y_base)
                     target_idx = targets.index(target)
                     colors.append(TARGET_COLORS[target_idx % len(TARGET_COLORS)])
-            pos += 1
     
-    # Create jitter for better visibility
-    jitter = np.random.uniform(-0.15, 0.15, len(positions))
+    # Create jitter on Y-axis for better visibility
+    jitter = np.random.uniform(-0.15, 0.15, len(y_positions_scatter))
+    y_jittered = [y + j for y, j in zip(y_positions_scatter, jitter)]
     
-    ax1.scatter(positions, all_tokens_per_sec, c=colors, alpha=0.6, s=60, edgecolors='black', linewidth=0.5)
+    ax1.scatter(all_tokens_per_sec, y_jittered, c=colors, alpha=0.6, s=60, edgecolors='black', linewidth=0.5)
     
-    # Add mean lines
-    pos = 0
+    # Add mean lines (vertical now, since axes are flipped)
     for protocol in protocols:
         for target in targets:
             results = [r for r in by_protocol[protocol] if r['target'] == target]
+            y_base = y_positions[(protocol, target)]
             for r in results:
                 mean_val = r['tokensPerSec']
-                ax1.hlines(mean_val, pos - 0.3, pos + 0.3, colors='red', linestyles='--', linewidth=2, alpha=0.8)
-            pos += 1
+                ax1.vlines(mean_val, y_base - 0.3, y_base + 0.3, colors='red', linestyles='--', linewidth=2, alpha=0.8)
     
-    ax1.set_xticks(range(pos))
-    ax1.set_xticklabels([f"{t}\n{p}" for p in protocols for t in targets], rotation=45, ha='right', fontsize=8)
-    ax1.set_ylabel('Tokens per Second', fontsize=11, fontweight='bold')
+    ax1.set_yticks(range(len(y_labels)))
+    ax1.set_yticklabels(y_labels, fontsize=8)
+    ax1.set_xlabel('Tokens per Second', fontsize=11, fontweight='bold')
     ax1.set_title('Tokens/Sec Distribution (Individual Runs)\nRed line = Mean', fontsize=12, fontweight='bold')
-    ax1.grid(axis='y', alpha=0.3, linestyle='--')
+    ax1.grid(axis='x', alpha=0.3, linestyle='--')
     ax1.set_axisbelow(True)
     
-    # --- Right plot: Box plot showing distribution and outliers ---
+    # --- Right plot: Horizontal box plot showing distribution and outliers ---
+    # With FLIPPED axes: horizontal boxes
     box_data = []
-    box_labels = []
-    box_colors = []
     
     for protocol in protocols:
         for target in targets:
@@ -464,11 +481,9 @@ def create_streaming_summary_page(pdf, streaming_data: list):
                 else:
                     values = [r['tokensPerSec']]
                 box_data.append(values)
-                box_labels.append(f"{target}\n{protocol}")
-                target_idx = targets.index(target)
-                box_colors.append(TARGET_COLORS[target_idx % len(TARGET_COLORS)])
     
-    bp = ax2.boxplot(box_data, patch_artist=True, tick_labels=box_labels)
+    # Create horizontal box plot (vert=False)
+    bp = ax2.boxplot(box_data, patch_artist=True, tick_labels=box_labels, vert=False)
     
     # Color the boxes
     for patch, color in zip(bp['boxes'], box_colors):
@@ -479,10 +494,10 @@ def create_streaming_summary_page(pdf, streaming_data: list):
     for flier in bp['fliers']:
         flier.set(marker='o', color='red', alpha=0.5, markersize=6)
     
-    ax2.set_xticklabels(box_labels, rotation=45, ha='right', fontsize=8)
-    ax2.set_ylabel('Tokens per Second', fontsize=11, fontweight='bold')
+    ax2.set_yticklabels(box_labels, fontsize=8)
+    ax2.set_xlabel('Tokens per Second', fontsize=11, fontweight='bold')
     ax2.set_title('Tokens/Sec Distribution (Box Plot)\nOutliers shown as red dots', fontsize=12, fontweight='bold')
-    ax2.grid(axis='y', alpha=0.3, linestyle='--')
+    ax2.grid(axis='x', alpha=0.3, linestyle='--')
     ax2.set_axisbelow(True)
     
     plt.tight_layout()
@@ -493,15 +508,15 @@ def create_streaming_summary_page(pdf, streaming_data: list):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
     fig.suptitle('Time to First Token (TTFT) Analysis', fontsize=16, fontweight='bold', y=0.98)
     
-    # TTFT scatter plot
+    # TTFT scatter plot with FLIPPED axes
     all_ttft = []
-    positions = []
+    y_positions_scatter = []
     colors = []
     
-    pos = 0
     for protocol in protocols:
         for target in targets:
             results = [r for r in by_protocol[protocol] if r['target'] == target]
+            y_base = y_positions[(protocol, target)]
             for r in results:
                 runs = r.get('runs', [])
                 if not runs:
@@ -509,34 +524,33 @@ def create_streaming_summary_page(pdf, streaming_data: list):
                 
                 for run in runs:
                     all_ttft.append(run['timeToFirstTokenMs'])
-                    positions.append(pos)
+                    y_positions_scatter.append(y_base)
                     target_idx = targets.index(target)
                     colors.append(TARGET_COLORS[target_idx % len(TARGET_COLORS)])
-            pos += 1
     
-    jitter = np.random.uniform(-0.15, 0.15, len(positions))
-    ax1.scatter(positions, all_ttft, c=colors, alpha=0.6, s=60, edgecolors='black', linewidth=0.5)
+    jitter = np.random.uniform(-0.15, 0.15, len(y_positions_scatter))
+    y_jittered = [y + j for y, j in zip(y_positions_scatter, jitter)]
     
-    # Add mean lines
-    pos = 0
+    ax1.scatter(all_ttft, y_jittered, c=colors, alpha=0.6, s=60, edgecolors='black', linewidth=0.5)
+    
+    # Add mean lines (vertical)
     for protocol in protocols:
         for target in targets:
             results = [r for r in by_protocol[protocol] if r['target'] == target]
+            y_base = y_positions[(protocol, target)]
             for r in results:
                 mean_val = r['timeToFirstTokenMs']
-                ax1.hlines(mean_val, pos - 0.3, pos + 0.3, colors='red', linestyles='--', linewidth=2, alpha=0.8)
-            pos += 1
+                ax1.vlines(mean_val, y_base - 0.3, y_base + 0.3, colors='red', linestyles='--', linewidth=2, alpha=0.8)
     
-    ax1.set_xticks(range(pos))
-    ax1.set_xticklabels([f"{t}\n{p}" for p in protocols for t in targets], rotation=45, ha='right', fontsize=8)
-    ax1.set_ylabel('Time to First Token (ms)', fontsize=11, fontweight='bold')
+    ax1.set_yticks(range(len(y_labels)))
+    ax1.set_yticklabels(y_labels, fontsize=8)
+    ax1.set_xlabel('Time to First Token (ms)', fontsize=11, fontweight='bold')
     ax1.set_title('TTFT Distribution (Individual Runs)\nRed line = Mean', fontsize=12, fontweight='bold')
-    ax1.grid(axis='y', alpha=0.3, linestyle='--')
+    ax1.grid(axis='x', alpha=0.3, linestyle='--')
     ax1.set_axisbelow(True)
     
-    # TTFT box plot
+    # TTFT horizontal box plot
     box_data = []
-    box_colors = []
     
     for protocol in protocols:
         for target in targets:
@@ -548,10 +562,8 @@ def create_streaming_summary_page(pdf, streaming_data: list):
                 else:
                     values = [r['timeToFirstTokenMs']]
                 box_data.append(values)
-                target_idx = targets.index(target)
-                box_colors.append(TARGET_COLORS[target_idx % len(TARGET_COLORS)])
     
-    bp = ax2.boxplot(box_data, patch_artist=True, tick_labels=box_labels)
+    bp = ax2.boxplot(box_data, patch_artist=True, tick_labels=box_labels, vert=False)
     
     for patch, color in zip(bp['boxes'], box_colors):
         patch.set_facecolor(color)
@@ -560,10 +572,10 @@ def create_streaming_summary_page(pdf, streaming_data: list):
     for flier in bp['fliers']:
         flier.set(marker='o', color='red', alpha=0.5, markersize=6)
     
-    ax2.set_xticklabels(box_labels, rotation=45, ha='right', fontsize=8)
-    ax2.set_ylabel('Time to First Token (ms)', fontsize=11, fontweight='bold')
+    ax2.set_yticklabels(box_labels, fontsize=8)
+    ax2.set_xlabel('Time to First Token (ms)', fontsize=11, fontweight='bold')
     ax2.set_title('TTFT Distribution (Box Plot)\nOutliers shown as red dots', fontsize=12, fontweight='bold')
-    ax2.grid(axis='y', alpha=0.3, linestyle='--')
+    ax2.grid(axis='x', alpha=0.3, linestyle='--')
     ax2.set_axisbelow(True)
     
     plt.tight_layout()
