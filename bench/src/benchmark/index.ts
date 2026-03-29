@@ -1665,31 +1665,6 @@ async function main() {
     errorLogger.printSummary();
     
     console.log('\n✅ Benchmark complete!');
-    
-    // Auto-generate report
-    console.log('\n📊 Generating report...');
-    await generatePdfReport(runId);
-}
-
-async function generatePdfReport(runId: string): Promise<void> {
-  try {
-    const proc = Bun.spawn(['python3', 'visualize.py', '--run-id', runId], {
-      stdout: 'inherit',
-      stderr: 'inherit',
-      cwd: process.cwd(),
-    });
-    
-    await proc.exited;
-    
-    if (proc.exitCode === 0) {
-      console.log(`\n📄 Report saved to: reports/benchmark_report_${runId}.pdf`);
-    } else {
-      console.log('\n⚠️  Report generation failed (non-critical)');
-    }
-  } catch (error) {
-    // Silently ignore report generation errors - it's optional
-    console.log('\n⚠️  Report generation skipped (visualize.py may not be available)');
-  }
 }
 
 main().catch(err => {
