@@ -116,7 +116,7 @@ describe("ProviderRegistry", () => {
   test("should create default config for built-in provider", () => {
     const config = registry.createDefaultConfig("openai");
     expect(config).toBeDefined();
-    expect(config?.baseUrl).toBe("https://api.openai.com/v1");
+    expect(config?.baseUrl).toBe("https://api.openai.com");
     expect(config?.apiKeyEnv).toBe("OPENAI_API_KEY");
   });
 

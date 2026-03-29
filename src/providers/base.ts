@@ -137,8 +137,7 @@ export abstract class BaseProvider {
     const baseUrl = this.config.baseUrl;
 
     // Default: OpenAI-compatible providers (standard /v1 paths)
-    // Note: Most providers use /v1 prefix. Override this method for providers
-    // that don't (e.g., Ollama default, some custom endpoints)
+    // Note: baseUrl should NOT include /v1 - it's added here as part of the endpoint path
     switch (format) {
       case "openai-responses":
         return `${baseUrl}/v1/responses`;

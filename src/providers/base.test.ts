@@ -11,7 +11,7 @@ describe("BaseProvider", () => {
   describe("OpenAICompatibleProvider", () => {
     let provider: OpenAICompatibleProvider;
     const config: ProviderConfig = {
-      baseUrl: "https://api.openai.com/v1",
+      baseUrl: "https://api.openai.com",
       apiKey: "test-api-key",
       authHeader: "Authorization",
       authPrefix: "Bearer ",
@@ -24,7 +24,7 @@ describe("BaseProvider", () => {
     });
 
     test("should return correct base URL", () => {
-      expect(provider.getBaseUrl()).toBe("https://api.openai.com/v1");
+      expect(provider.getBaseUrl()).toBe("https://api.openai.com");
     });
 
     test("should return API key from config", () => {
@@ -85,7 +85,7 @@ describe("BaseProvider", () => {
     test("should return provider info", () => {
       const info = provider.getInfo();
       expect(info.id).toBe("openai");
-      expect(info.baseUrl).toBe("https://api.openai.com/v1");
+      expect(info.baseUrl).toBe("https://api.openai.com");
       expect(info.hasApiKey).toBe(true);
       expect(info.supportsStreaming).toBe(true);
       expect(info.timeout).toBe(120);

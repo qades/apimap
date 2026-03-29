@@ -5,7 +5,7 @@ import type { ProviderConfig } from "../../types/index.ts";
 describe("CohereProvider", () => {
   let provider: CohereProvider;
   const config: ProviderConfig = {
-    baseUrl: "https://api.cohere.ai/v1",
+    baseUrl: "https://api.cohere.ai",
     apiKey: "test-cohere-key",
     authHeader: "Authorization",
     authPrefix: "Bearer ",
@@ -18,7 +18,7 @@ describe("CohereProvider", () => {
   });
 
   test("should return correct base URL", () => {
-    expect(provider.getBaseUrl()).toBe("https://api.cohere.ai/v1");
+    expect(provider.getBaseUrl()).toBe("https://api.cohere.ai");
   });
 
   test("should use Bearer token auth", () => {

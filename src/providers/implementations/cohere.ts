@@ -18,6 +18,7 @@ export class CohereProvider extends BaseProvider {
 
   /**
    * Cohere uses /v1/chat endpoint for chat completions
+   * Note: baseUrl should NOT include /v1 - it's added here as part of the endpoint path
    */
   override getEndpointUrl(format: string): string {
     const baseUrl = this.config.baseUrl;

@@ -29,7 +29,7 @@ describe("BUILTIN_PROVIDERS", () => {
     const openai = BUILTIN_PROVIDERS.openai;
     expect(openai.id).toBe("openai");
     expect(openai.name).toBe("OpenAI");
-    expect(openai.defaultBaseUrl).toBe("https://api.openai.com/v1");
+    expect(openai.defaultBaseUrl).toBe("https://api.openai.com");
     expect(openai.defaultApiKeyEnv).toBe("OPENAI_API_KEY");
     expect(openai.authHeader).toBe("Authorization");
     expect(openai.authPrefix).toBe("Bearer ");
