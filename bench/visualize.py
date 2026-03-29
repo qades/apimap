@@ -184,6 +184,7 @@ def create_visualizations(data: dict, output_path: Path, config: dict = None):
     """Create matplotlib visualizations - 1 page per target endpoint @ concurrency combination.
     
     Layout: Grouped by target endpoint first, then contenders for easy transformation comparison.
+    Uses box plots to show distribution across all protocol combinations.
     """
     if not MATPLOTLIB_AVAILABLE:
         return
@@ -240,71 +241,105 @@ def create_visualizations(data: dict, output_path: Path, config: dict = None):
             fig.suptitle(f'{target_endpoint} @ {concurrency} Concurrent Requests', 
                         fontsize=16, fontweight='bold', y=0.98)
             
-            # --- Latency subplot (horizontal bars) ---
+            # --- Latency subplot (horizontal box plots) ---
             if lat_results:
-                metrics = ['mean', 'p95']
-                metric_labels = ['Mean', 'P95']
-                y = np.arange(len(contenders))
-                height = 0.6 / len(metrics)
-                
-                for j, metric in enumerate(metrics):
-                    values = []
-                    for contender in contenders:
-                        target_lats = [r for r in lat_results if r['target'] == contender]
-                        if target_lats:
-                            stats = calculate_stats(target_lats[0].get('latencies', []))
-                            values.append(stats[metric])
-                        else:
-                            values.append(0)
-                    
-                    offset = height * (j - (len(metrics) - 1) / 2)
-                    bars = ax1.barh(y + offset, values, height, label=metric_labels[j],
-                                   color=CONTENDER_COLORS[j % len(CONTENDER_COLORS)],
-                                   edgecolor='black', linewidth=1.2)
-                    # Add value labels
-                    for i, bar in enumerate(bars):
-                        width_val = bar.get_width()
-                        if width_val > 0:
-                            ax1.text(width_val, bar.get_y() + bar.get_height()/2.,
-                                   f' {width_val:.1f}',
-                                   ha='left', va='center', fontsize=8)
-                
-                ax1.set_xlabel('Milliseconds (ms)', fontsize=11, fontweight='bold')
-                ax1.set_title('Latency (Lower is Better)', fontsize=12, fontweight='bold')
-                ax1.set_yticks(y)
-                ax1.set_yticklabels(contenders)
-                ax1.legend(fontsize=10, loc='lower right')
-                ax1.grid(axis='x', alpha=0.3, linestyle='--')
-                ax1.set_axisbelow(True)
-            
-            # --- Throughput subplot (horizontal bars) ---
-            if tp_results:
-                y = np.arange(len(contenders))
-                throughputs = []
+                # Aggregate all latencies per contender across all protocol combinations
+                latency_box_data = []
+                latency_box_labels = []
+                latency_box_colors = []
                 
                 for contender in contenders:
-                    target_tp = [r for r in tp_results if r['target'] == contender]
-                    if target_tp:
-                        throughputs.append(target_tp[0]['requestsPerSecond'])
-                    else:
-                        throughputs.append(0)
+                    target_results = [r for r in lat_results if r['target'] == contender]
+                    # Collect all latencies from all protocol combinations
+                    all_latencies = []
+                    for r in target_results:
+                        all_latencies.extend(r.get('latencies', []))
+                    
+                    if all_latencies:
+                        latency_box_data.append(all_latencies)
+                        latency_box_labels.append(contender)
+                        contender_idx = contenders.index(contender)
+                        latency_box_colors.append(CONTENDER_COLORS[contender_idx % len(CONTENDER_COLORS)])
                 
-                bars = ax2.barh(y, throughputs, color=[CONTENDER_COLORS[i % len(CONTENDER_COLORS)] for i in range(len(contenders))],
-                              edgecolor='black', linewidth=1.2, height=0.6)
-                # Add value labels
-                for i, bar in enumerate(bars):
-                    width_val = bar.get_width()
-                    if width_val > 0:
-                        ax2.text(width_val, bar.get_y() + bar.get_height()/2.,
-                               f' {width_val:.1f}',
-                               ha='left', va='center', fontsize=9)
+                if latency_box_data:
+                    bp = ax1.boxplot(latency_box_data, patch_artist=True, tick_labels=latency_box_labels, vert=False)
+                    
+                    for patch, color in zip(bp['boxes'], latency_box_colors):
+                        patch.set_facecolor(color)
+                        patch.set_alpha(0.7)
+                    
+                    for whisker in bp['whiskers']:
+                        whisker.set(color='gray', linewidth=1.5)
+                    
+                    for cap in bp['caps']:
+                        cap.set(color='gray', linewidth=1.5)
+                    
+                    for median in bp['medians']:
+                        median.set(color='red', linewidth=2)
+                    
+                    for flier in bp['fliers']:
+                        flier.set(marker='o', color='red', alpha=0.5, markersize=4)
+                    
+                    # Add mean values as text annotations
+                    for i, (lat_data, label) in enumerate(zip(latency_box_data, latency_box_labels)):
+                        mean_val = mean(lat_data)
+                        ax1.text(mean_val, i + 1.15, f' μ={mean_val:.1f}', 
+                                ha='center', va='bottom', fontsize=8, color='darkred')
+                    
+                    ax1.set_xlabel('Milliseconds (ms)', fontsize=11, fontweight='bold')
+                    ax1.set_title('Latency Distribution (Lower is Better)\nBox: Q1-Q3, Line: Median, Red μ: Mean', 
+                                 fontsize=11, fontweight='bold')
+                    ax1.grid(axis='x', alpha=0.3, linestyle='--')
+                    ax1.set_axisbelow(True)
+            
+            # --- Throughput subplot (horizontal box plots) ---
+            if tp_results:
+                # Aggregate throughput values per contender across all protocol combinations
+                throughput_box_data = []
+                throughput_box_labels = []
+                throughput_box_colors = []
                 
-                ax2.set_xlabel('Requests per Second', fontsize=11, fontweight='bold')
-                ax2.set_title('Throughput (Higher is Better)', fontsize=12, fontweight='bold')
-                ax2.set_yticks(y)
-                ax2.set_yticklabels(contenders)
-                ax2.grid(axis='x', alpha=0.3, linestyle='--')
-                ax2.set_axisbelow(True)
+                for contender in contenders:
+                    target_results = [r for r in tp_results if r['target'] == contender]
+                    # Collect throughput values from all protocol combinations
+                    values = [r['requestsPerSecond'] for r in target_results]
+                    
+                    if values:
+                        throughput_box_data.append(values)
+                        throughput_box_labels.append(contender)
+                        contender_idx = contenders.index(contender)
+                        throughput_box_colors.append(CONTENDER_COLORS[contender_idx % len(CONTENDER_COLORS)])
+                
+                if throughput_box_data:
+                    bp = ax2.boxplot(throughput_box_data, patch_artist=True, tick_labels=throughput_box_labels, vert=False)
+                    
+                    for patch, color in zip(bp['boxes'], throughput_box_colors):
+                        patch.set_facecolor(color)
+                        patch.set_alpha(0.7)
+                    
+                    for whisker in bp['whiskers']:
+                        whisker.set(color='gray', linewidth=1.5)
+                    
+                    for cap in bp['caps']:
+                        cap.set(color='gray', linewidth=1.5)
+                    
+                    for median in bp['medians']:
+                        median.set(color='red', linewidth=2)
+                    
+                    for flier in bp['fliers']:
+                        flier.set(marker='o', color='red', alpha=0.5, markersize=4)
+                    
+                    # Add mean values as text annotations
+                    for i, (tp_data, label) in enumerate(zip(throughput_box_data, throughput_box_labels)):
+                        mean_val = mean(tp_data)
+                        ax2.text(mean_val, i + 1.15, f' μ={mean_val:.1f}', 
+                                ha='center', va='bottom', fontsize=8, color='darkred')
+                    
+                    ax2.set_xlabel('Requests per Second', fontsize=11, fontweight='bold')
+                    ax2.set_title('Throughput Distribution (Higher is Better)\nBox: Q1-Q3, Line: Median, Red μ: Mean', 
+                                 fontsize=11, fontweight='bold')
+                    ax2.grid(axis='x', alpha=0.3, linestyle='--')
+                    ax2.set_axisbelow(True)
             
             plt.tight_layout(rect=[0, 0, 1, 0.96])  # Make room for suptitle
             pdf.savefig(fig, dpi=100)
