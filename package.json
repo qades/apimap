@@ -17,10 +17,9 @@
     "lint": "tsc --noEmit",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "bench:prune": "docker network prune -f 2>/dev/null || podman network prune -f 2>/dev/null || true",
-    "bench": "cd bench && docker-compose stop -t 2 2>/dev/null; docker-compose rm -f 2>/dev/null; bun run bench:prune && docker-compose up -d mock-server litellm-db litellm apimap && echo 'Waiting for services...' && sleep 15 && docker-compose --profile benchmark run --rm benchmark && docker-compose down -v",
-    "bench:full": "cd bench && docker-compose stop -t 2 2>/dev/null; docker-compose rm -f 2>/dev/null; bun run bench:prune && BENCHMARK_ALL_PROTOCOLS=true docker-compose up -d mock-server litellm-db litellm apimap && echo 'Waiting for services...' && sleep 15 && BENCHMARK_ALL_PROTOCOLS=true docker-compose --profile benchmark run --rm benchmark && docker-compose down -v",
-    "bench:quick": "cd bench && docker-compose stop -t 2 2>/dev/null; docker-compose rm -f 2>/dev/null; bun run bench:prune && BENCHMARK_SCENARIOS='1:5,5:6' docker-compose up -d mock-server litellm-db litellm apimap && echo 'Waiting for services...' && sleep 15 && BENCHMARK_SCENARIOS='1:5,5:6' docker-compose --profile benchmark run --rm benchmark && docker-compose down -v",
+    "bench": "cd bench && docker-compose up -d mock-server litellm-db litellm apimap && echo 'Waiting for services...' && sleep 15 && docker-compose --profile benchmark run --rm benchmark && docker-compose down -v",
+    "bench:full": "cd bench && BENCHMARK_ALL_PROTOCOLS=true docker-compose up -d mock-server litellm-db litellm apimap && echo 'Waiting for services...' && sleep 15 && BENCHMARK_ALL_PROTOCOLS=true docker-compose --profile benchmark run --rm benchmark && docker-compose down -v",
+    "bench:quick": "cd bench && BENCHMARK_SCENARIOS='1:5,5:6' docker-compose up -d mock-server litellm-db litellm apimap && echo 'Waiting for services...' && sleep 15 && BENCHMARK_SCENARIOS='1:5,5:6' docker-compose --profile benchmark run --rm benchmark && docker-compose down -v",
     "docker:build": "docker build -t apimap:local .",
     "docker:run": "docker run -p 3000:3000 -p 3001:3001 --rm apimap:local",
     "endpoints": "bun run scripts/list-endpoints.ts"
