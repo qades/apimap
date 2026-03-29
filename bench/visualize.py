@@ -360,7 +360,7 @@ def create_visualizations(data: dict, output_path: Path, config: dict = None):
         pdf.savefig(fig, dpi=150)
         plt.close()
     
-    print(f"📊 Visualizations saved to: {output_path}
+    print(f"📊 Visualizations saved to: {output_path}")
 
 
 def create_summary_page(pdf, data: dict, all_keys: list):
