@@ -675,70 +675,37 @@ async function runWarmup(client: GatewayClient, config: BenchmarkConfig, errorLo
   await Promise.all(promises);
 }
 
-async function benchmarkLatency(
+interface CombinedBenchmarkResult {
+  latency: LatencyResult;
+  throughput: ThroughputResult;
+}
+
+async function benchmarkScenario(
   client: GatewayClient,
   scenario: ScenarioConfig,
   errorLogger?: ErrorLogger,
-): Promise<LatencyResult> {
+): Promise<CombinedBenchmarkResult> {
   const protocolDesc = scenario.protocol ? ` (${scenario.protocol.description})` : '';
-  console.log(`  Testing latency: ${client.getName()} - ${scenario.name}${protocolDesc} (${scenario.requests} requests)`);
+  console.log(`  Testing: ${client.getName()} - ${scenario.name}${protocolDesc} (${scenario.requests} requests, ${scenario.concurrency} concurrent)`);
   
   const prompt = generatePrompt(scenario.promptSize);
   const context = generateContext(scenario.contextSize);
   const messages = buildMessages(prompt, context);
   
   const latencies: number[] = [];
-  let errors = 0;
-  
-  const model = getModelForProtocol(scenario.protocol);
-  
-  for (let i = 0; i < scenario.requests; i++) {
-    const result = await client.chatCompletion(
-      model,
-      messages,
-      scenario.maxTokens,
-      scenario.useStreaming,
-      scenario.protocol,
-    );
-    
-    if (result.success) {
-      latencies.push(result.latencyMs);
-    } else {
-      errors++;
-    }
-  }
-  
-  return {
-    target: client.getName(),
-    scenario: scenario.name,
-    latencies,
-    errors,
-    total: scenario.requests,
-  };
-}
-
-async function benchmarkThroughput(
-  client: GatewayClient,
-  scenario: ScenarioConfig,
-  errorLogger?: ErrorLogger,
-): Promise<ThroughputResult> {
-  const protocolDesc = scenario.protocol ? ` (${scenario.protocol.description})` : '';
-  console.log(`  Testing throughput: ${client.getName()} - ${scenario.name}${protocolDesc} (${scenario.concurrency} concurrent)`);
-  
-  const prompt = generatePrompt(scenario.promptSize);
-  const context = generateContext(scenario.contextSize);
-  const messages = buildMessages(prompt, context);
-  
-  const startTime = performance.now();
   let completed = 0;
   let errors = 0;
   
   const totalRequests = scenario.requests;
   const concurrency = scenario.concurrency;
+  const model = getModelForProtocol(scenario.protocol);
+  
+  // Measure throughput: overall time for all requests
+  const startTime = performance.now();
   
   for (let i = 0; i < totalRequests; i += concurrency) {
-    const model = getModelForProtocol(scenario.protocol);
-    const batch = Array(Math.min(concurrency, totalRequests - i)).fill(null).map(async () => {
+    const batchSize = Math.min(concurrency, totalRequests - i);
+    const batchPromises = Array(batchSize).fill(null).map(async () => {
       const result = await client.chatCompletion(
         model,
         messages,
@@ -748,25 +715,36 @@ async function benchmarkThroughput(
       );
       
       if (result.success) {
+        // Record individual latency for this request
+        latencies.push(result.latencyMs);
         completed++;
       } else {
         errors++;
       }
     });
     
-    await Promise.all(batch);
+    await Promise.all(batchPromises);
   }
   
   const durationMs = performance.now() - startTime;
   const requestsPerSecond = (completed / durationMs) * 1000;
   
   return {
-    target: client.getName(),
-    scenario: scenario.name,
-    requestsPerSecond,
-    totalRequests: completed,
-    durationMs,
-    errors,
+    latency: {
+      target: client.getName(),
+      scenario: scenario.name,
+      latencies,
+      errors,
+      total: scenario.requests,
+    },
+    throughput: {
+      target: client.getName(),
+      scenario: scenario.name,
+      requestsPerSecond,
+      totalRequests: completed,
+      durationMs,
+      errors,
+    },
   };
 }
 
@@ -1593,22 +1571,17 @@ async function main() {
       console.log(`\n--- Scenario: ${scenario.name} (${scenario.concurrency} concurrent, ${scenario.requests} requests) ---\n`);
       
       for (const client of clients) {
-        // Latency test (sequential)
-        const latencyResult = await benchmarkLatency(client, scenario, errorLogger);
-        results.latency.push(latencyResult);
+        // Combined benchmark: measures both latency and throughput in one run
+        const combinedResult = await benchmarkScenario(client, scenario, errorLogger);
+        results.latency.push(combinedResult.latency);
+        results.throughput.push(combinedResult.throughput);
         
-        const stats = analyzeLatencies(latencyResult.latencies);
+        const stats = analyzeLatencies(combinedResult.latency.latencies);
         if (stats) {
-          console.log(`    Latency: Mean=${stats.mean.toFixed(1)}ms, P95=${stats.p95.toFixed(1)}ms`);
-        } else if (latencyResult.errors > 0) {
-          console.log(`    Latency: ${latencyResult.errors}/${latencyResult.total} requests failed`);
+          console.log(`    Latency: Mean=${stats.mean.toFixed(1)}ms, P95=${stats.p95.toFixed(1)}ms | Throughput: ${combinedResult.throughput.requestsPerSecond.toFixed(1)} req/sec`);
+        } else if (combinedResult.latency.errors > 0) {
+          console.log(`    Failed: ${combinedResult.latency.errors}/${combinedResult.latency.total} requests`);
         }
-        
-        // Throughput test (concurrent)
-        const throughputResult = await benchmarkThroughput(client, scenario, errorLogger);
-        results.throughput.push(throughputResult);
-        
-        console.log(`    Throughput: ${throughputResult.requestsPerSecond.toFixed(1)} req/sec`);
       }
     }
 
