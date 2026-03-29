@@ -54,7 +54,7 @@ const config: Config = {
   latencyMeanMs: defaultConfig.latencyMeanMs,
   latencyStdMs: defaultConfig.latencyStdMs,
   tokensPerSecond: defaultConfig.tokensPerSecond,
-  errorRate: parseFloat(Bun.env.MOCK_ERROR_RATE || '0.01'),
+  errorRate: parseFloat(Bun.env.MOCK_ERROR_RATE || '0'),
   maxContextLength: parseInt(Bun.env.MOCK_MAX_CONTEXT || '8192'),
   streamingEnabled: defaultConfig.streamingEnabled,
   logDir: Bun.env.MOCK_LOG_DIR || './logs',
@@ -69,6 +69,7 @@ const throttleConfig: ThrottleConfig = {
   latencyStdMs: config.latencyStdMs,
   tokensPerSecond: config.tokensPerSecond,
   streamingEnabled: config.streamingEnabled,
+  instantMode: Bun.env.MOCK_INSTANT_MODE === 'true',
 };
 
 // ============================================================================
@@ -2092,6 +2093,60 @@ const app = new Elysia()
     return handleOpenAIRequest(body as Record<string, unknown>, request, startTime);
   })
 
+  // Admin config endpoint (for benchmark runner to dynamically adjust settings)
+  .post('/admin/config', async ({ body }) => {
+    const b = body as Record<string, unknown>;
+    
+    if (b.errorRate !== undefined) {
+      const rate = Number(b.errorRate);
+      if (!isNaN(rate) && rate >= 0 && rate <= 1) {
+        config.errorRate = rate;
+      }
+    }
+    if (b.latencyMeanMs !== undefined) {
+      const val = Number(b.latencyMeanMs);
+      if (!isNaN(val) && val >= 0) {
+        config.latencyMeanMs = val;
+        throttleConfig.latencyMeanMs = val;
+      }
+    }
+    if (b.latencyStdMs !== undefined) {
+      const val = Number(b.latencyStdMs);
+      if (!isNaN(val) && val >= 0) {
+        config.latencyStdMs = val;
+        throttleConfig.latencyStdMs = val;
+      }
+    }
+    if (b.tokensPerSecond !== undefined) {
+      const val = Number(b.tokensPerSecond);
+      if (!isNaN(val) && val > 0) {
+        config.tokensPerSecond = val;
+        throttleConfig.tokensPerSecond = val;
+      }
+    }
+    if (b.streamingEnabled !== undefined) {
+      config.streamingEnabled = Boolean(b.streamingEnabled);
+      throttleConfig.streamingEnabled = Boolean(b.streamingEnabled);
+    }
+    if (b.instantMode !== undefined) {
+      config.latencyMeanMs = 0;
+      config.latencyStdMs = 0;
+      throttleConfig.instantMode = Boolean(b.instantMode);
+    }
+    
+    return {
+      success: true,
+      config: {
+        latencyMeanMs: config.latencyMeanMs,
+        latencyStdMs: config.latencyStdMs,
+        tokensPerSecond: config.tokensPerSecond,
+        errorRate: config.errorRate,
+        streamingEnabled: config.streamingEnabled,
+        instantMode: throttleConfig.instantMode,
+      },
+    };
+  })
+
   // Root
   .get('/', () => ({
     name: 'Multi-Provider Mock LLM Server',
@@ -2099,6 +2154,7 @@ const app = new Elysia()
     endpoints: {
       health: '/health',
       info: '/info',
+      admin: '/admin/config',
       models: '/v1/models',
       openai: '/v1/chat/completions',
       'openai-legacy': '/v1/completions',

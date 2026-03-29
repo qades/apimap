@@ -23,8 +23,8 @@ try:
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
-# Color palette for targets (supports up to 5 targets)
-TARGET_COLORS = ['#4a90d9', '#d94a4a', '#4ad94a', '#d94ad9', '#d9a34a']
+# Color palette for contenders (supports up to 5 targets)
+CONTENDER_COLORS = ['#4a90d9', '#d94a4a', '#4ad94a', '#d94ad9', '#d9a34a']
 
 def load_results(filepath: Path) -> dict:
     """Load benchmark results from JSON file."""
@@ -85,6 +85,20 @@ def get_scenario_protocol_description(scenario_name: str, config: dict) -> str:
     return 'OpenAI→OpenAI'
 
 
+def get_target_endpoint(protocol_description: str) -> str:
+    """Extract target endpoint from protocol description (e.g., 'OpenAI→Anthropic' -> 'Anthropic')."""
+    if '→' in protocol_description:
+        return protocol_description.split('→')[1]
+    return protocol_description
+
+
+def get_source_protocol(protocol_description: str) -> str:
+    """Extract source protocol from protocol description (e.g., 'OpenAI→Anthropic' -> 'OpenAI')."""
+    if '→' in protocol_description:
+        return protocol_description.split('→')[0]
+    return protocol_description
+
+
 def group_by_protocol(results: list, config: dict) -> dict:
     """Group results by protocol for side-by-side comparison."""
     grouped = {}
@@ -94,6 +108,19 @@ def group_by_protocol(results: list, config: dict) -> dict:
         if protocol not in grouped:
             grouped[protocol] = []
         grouped[protocol].append(r)
+    return grouped
+
+
+def group_by_target_endpoint(results: list, config: dict) -> dict:
+    """Group results by target endpoint (e.g., 'Anthropic', 'OpenAI')."""
+    grouped = {}
+    for r in results:
+        scenario = r.get('scenario', '')
+        protocol = get_protocol_from_scenario(scenario, config)
+        target_endpoint = get_target_endpoint(protocol)
+        if target_endpoint not in grouped:
+            grouped[target_endpoint] = []
+        grouped[target_endpoint].append(r)
     return grouped
 
 
@@ -153,23 +180,10 @@ def print_text_report(data: dict, config: dict = None):
     print("\n" + "="*70)
 
 
-def group_results_by_concurrency_and_protocol(results: list, config: dict) -> dict:
-    """Group results by (concurrency, protocol) tuple."""
-    grouped = {}
-    for r in results:
-        scenario_name = r.get('scenario', '')
-        concurrency = get_scenario_concurrency(scenario_name, config)
-        protocol = get_protocol_from_scenario(scenario_name, config)
-        key = (concurrency, protocol)
-        if key not in grouped:
-            grouped[key] = []
-        grouped[key].append(r)
-    return grouped
-
 def create_visualizations(data: dict, output_path: Path, config: dict = None):
-    """Create matplotlib visualizations - 1 page per concurrency-protocol combination.
+    """Create matplotlib visualizations - 1 page per target endpoint @ concurrency combination.
     
-    Layout: Targets on Y-axis, metrics on X-axis for easy comparison.
+    Layout: Grouped by target endpoint first, then contenders for easy transformation comparison.
     """
     if not MATPLOTLIB_AVAILABLE:
         return
@@ -181,42 +195,62 @@ def create_visualizations(data: dict, output_path: Path, config: dict = None):
         latency_data = data.get('latency', [])
         throughput_data = data.get('throughput', [])
         
-        # Group by (concurrency, protocol)
-        latency_grouped = group_results_by_concurrency_and_protocol(latency_data, config)
-        throughput_grouped = group_results_by_concurrency_and_protocol(throughput_data, config)
+        # Group by (target_endpoint, concurrency)
+        latency_grouped = {}
+        throughput_grouped = {}
         
-        # Get all unique (concurrency, protocol) combinations
+        for r in latency_data:
+            scenario_name = r.get('scenario', '')
+            concurrency = get_scenario_concurrency(scenario_name, config)
+            protocol = get_protocol_from_scenario(scenario_name, config)
+            target_endpoint = get_target_endpoint(protocol)
+            key = (target_endpoint, concurrency)
+            if key not in latency_grouped:
+                latency_grouped[key] = []
+            latency_grouped[key].append(r)
+        
+        for r in throughput_data:
+            scenario_name = r.get('scenario', '')
+            concurrency = get_scenario_concurrency(scenario_name, config)
+            protocol = get_protocol_from_scenario(scenario_name, config)
+            target_endpoint = get_target_endpoint(protocol)
+            key = (target_endpoint, concurrency)
+            if key not in throughput_grouped:
+                throughput_grouped[key] = []
+            throughput_grouped[key].append(r)
+        
+        # Get all unique (target_endpoint, concurrency) combinations
         all_keys = sorted(set(list(latency_grouped.keys()) + list(throughput_grouped.keys())))
         
-        # Page per (concurrency, protocol) combination
-        for concurrency, protocol in all_keys:
-            lat_results = latency_grouped.get((concurrency, protocol), [])
-            tp_results = throughput_grouped.get((concurrency, protocol), [])
+        # Page per (target_endpoint, concurrency) combination
+        for target_endpoint, concurrency in all_keys:
+            lat_results = latency_grouped.get((target_endpoint, concurrency), [])
+            tp_results = throughput_grouped.get((target_endpoint, concurrency), [])
             
             if not lat_results and not tp_results:
                 continue
             
-            # Get targets
-            targets = sorted(set(r['target'] for r in lat_results + tp_results))
-            if not targets:
+            # Get contenders (targets)
+            contenders = sorted(set(r['target'] for r in lat_results + tp_results))
+            if not contenders:
                 continue
             
             # Create figure with 2 subplots (latency and throughput)
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-            fig.suptitle(f'{protocol} @ {concurrency} Concurrent Requests', 
+            fig.suptitle(f'{target_endpoint} @ {concurrency} Concurrent Requests', 
                         fontsize=16, fontweight='bold', y=0.98)
             
             # --- Latency subplot (horizontal bars) ---
             if lat_results:
                 metrics = ['mean', 'p95']
                 metric_labels = ['Mean', 'P95']
-                y = np.arange(len(targets))
+                y = np.arange(len(contenders))
                 height = 0.6 / len(metrics)
                 
                 for j, metric in enumerate(metrics):
                     values = []
-                    for target in targets:
-                        target_lats = [r for r in lat_results if r['target'] == target]
+                    for contender in contenders:
+                        target_lats = [r for r in lat_results if r['target'] == contender]
                         if target_lats:
                             stats = calculate_stats(target_lats[0].get('latencies', []))
                             values.append(stats[metric])
@@ -225,7 +259,7 @@ def create_visualizations(data: dict, output_path: Path, config: dict = None):
                     
                     offset = height * (j - (len(metrics) - 1) / 2)
                     bars = ax1.barh(y + offset, values, height, label=metric_labels[j],
-                                   color=TARGET_COLORS[j % len(TARGET_COLORS)],
+                                   color=CONTENDER_COLORS[j % len(CONTENDER_COLORS)],
                                    edgecolor='black', linewidth=1.2)
                     # Add value labels
                     for i, bar in enumerate(bars):
@@ -238,24 +272,24 @@ def create_visualizations(data: dict, output_path: Path, config: dict = None):
                 ax1.set_xlabel('Milliseconds (ms)', fontsize=11, fontweight='bold')
                 ax1.set_title('Latency (Lower is Better)', fontsize=12, fontweight='bold')
                 ax1.set_yticks(y)
-                ax1.set_yticklabels(targets)
+                ax1.set_yticklabels(contenders)
                 ax1.legend(fontsize=10, loc='lower right')
                 ax1.grid(axis='x', alpha=0.3, linestyle='--')
                 ax1.set_axisbelow(True)
             
             # --- Throughput subplot (horizontal bars) ---
             if tp_results:
-                y = np.arange(len(targets))
+                y = np.arange(len(contenders))
                 throughputs = []
                 
-                for target in targets:
-                    target_tp = [r for r in tp_results if r['target'] == target]
+                for contender in contenders:
+                    target_tp = [r for r in tp_results if r['target'] == contender]
                     if target_tp:
                         throughputs.append(target_tp[0]['requestsPerSecond'])
                     else:
                         throughputs.append(0)
                 
-                bars = ax2.barh(y, throughputs, color=[TARGET_COLORS[i % len(TARGET_COLORS)] for i in range(len(targets))],
+                bars = ax2.barh(y, throughputs, color=[CONTENDER_COLORS[i % len(CONTENDER_COLORS)] for i in range(len(contenders))],
                               edgecolor='black', linewidth=1.2, height=0.6)
                 # Add value labels
                 for i, bar in enumerate(bars):
@@ -268,7 +302,7 @@ def create_visualizations(data: dict, output_path: Path, config: dict = None):
                 ax2.set_xlabel('Requests per Second', fontsize=11, fontweight='bold')
                 ax2.set_title('Throughput (Higher is Better)', fontsize=12, fontweight='bold')
                 ax2.set_yticks(y)
-                ax2.set_yticklabels(targets)
+                ax2.set_yticklabels(contenders)
                 ax2.grid(axis='x', alpha=0.3, linestyle='--')
                 ax2.set_axisbelow(True)
             
@@ -276,32 +310,29 @@ def create_visualizations(data: dict, output_path: Path, config: dict = None):
             pdf.savefig(fig, dpi=100)
             plt.close()
         
-        # Summary page at the end
-        if all_keys:
-            create_summary_page(pdf, data, all_keys)
-        elif throughput_data:
-            # Fallback: simple grouped chart if no config available
+        # Fallback chart if no config grouping available
+        if not all_keys and throughput_data:
             scenarios = sorted(set(r['scenario'] for r in throughput_data))
-            targets_in_data = sorted(set(r['target'] for r in throughput_data))
-            num_targets_tp = len(targets_in_data)
+            contenders_in_data = sorted(set(r['target'] for r in throughput_data))
+            num_contenders = len(contenders_in_data)
             
             fig, ax = plt.subplots(figsize=(12, 6))
             x = np.arange(len(scenarios))
-            width = 0.8 / num_targets_tp
+            width = 0.8 / num_contenders
             
-            for i, target in enumerate(targets_in_data):
+            for i, contender in enumerate(contenders_in_data):
                 throughputs = []
                 for scenario in scenarios:
                     value = 0
                     for r in throughput_data:
-                        if r['target'] == target and r['scenario'] == scenario:
+                        if r['target'] == contender and r['scenario'] == scenario:
                             value = r['requestsPerSecond']
                             break
                     throughputs.append(value)
                 
-                offset = width * (i - (num_targets_tp - 1) / 2)
-                bars = ax.bar(x + offset, throughputs, width, label=target,
-                             color=TARGET_COLORS[i % len(TARGET_COLORS)], edgecolor='black', linewidth=1.2)
+                offset = width * (i - (num_contenders - 1) / 2)
+                bars = ax.bar(x + offset, throughputs, width, label=contender,
+                             color=CONTENDER_COLORS[i % len(CONTENDER_COLORS)], edgecolor='black', linewidth=1.2)
                 for bar in bars:
                     height = bar.get_height()
                     ax.text(bar.get_x() + bar.get_width()/2., height,
@@ -326,124 +357,90 @@ def create_visualizations(data: dict, output_path: Path, config: dict = None):
         streaming_data = data.get('streaming', [])
         if streaming_data:
             create_streaming_summary_page(pdf, streaming_data)
-        
-        # Summary table page
-        if all_keys:
-            create_summary_page(pdf, data, all_keys)
     
     print(f"📊 Visualizations saved to: {output_path}")
 
 
-def create_summary_page(pdf, data: dict, all_keys: list):
-    """Create a summary table page at the end."""
-    fig, ax = plt.subplots(figsize=(12, 8))
-    ax.axis('off')
-    
-    # Build summary data
-    table_data = [['Concurrency', 'Protocol', 'Target', 'Latency Mean', 'Throughput']]
-    
-    for concurrency, protocol in sorted(all_keys):
-        # Find latency and throughput for this combination
-        lat_results = [r for r in data.get('latency', []) 
-                      if get_scenario_concurrency(r.get('scenario', ''), data.get('config', {})) == concurrency
-                      and get_protocol_from_scenario(r.get('scenario', ''), data.get('config', {})) == protocol]
-        tp_results = [r for r in data.get('throughput', []) 
-                     if get_scenario_concurrency(r.get('scenario', ''), data.get('config', {})) == concurrency
-                     and get_protocol_from_scenario(r.get('scenario', ''), data.get('config', {})) == protocol]
-        
-        targets = sorted(set(r['target'] for r in lat_results + tp_results))
-        
-        for target in targets:
-            lat = next((r for r in lat_results if r['target'] == target), None)
-            tp = next((r for r in tp_results if r['target'] == target), None)
-            
-            lat_mean = f"{calculate_stats(lat.get('latencies', []))['mean']:.1f} ms" if lat else 'N/A'
-            tp_val = f"{tp['requestsPerSecond']:.1f} req/s" if tp else 'N/A'
-            
-            table_data.append([str(concurrency), protocol, target, lat_mean, tp_val])
-    
-    table = ax.table(cellText=table_data, loc='center', cellLoc='center',
-                    colWidths=[0.12, 0.28, 0.15, 0.2, 0.25])
-    table.auto_set_font_size(False)
-    table.set_fontsize(9)
-    table.scale(1, 1.8)
-    
-    # Style header row
-    for i in range(len(table_data[0])):
-        table[(0, i)].set_facecolor('#4a90d9')
-        table[(0, i)].set_text_props(weight='bold', color='white')
-    
-    # Alternate row colors
-    for i in range(1, len(table_data)):
-        color = '#f0f0f0' if i % 2 == 0 else 'white'
-        for j in range(len(table_data[0])):
-            table[(i, j)].set_facecolor(color)
-    
-    ax.set_title('Benchmark Summary by Concurrency & Protocol', 
-                fontsize=14, fontweight='bold', pad=20)
-    
-    plt.tight_layout()
-    pdf.savefig(fig, dpi=150)
-    plt.close()
-
-
 def create_streaming_summary_page(pdf, streaming_data: list):
-    """Create a streaming performance summary page with scatter plots showing distribution and outliers.
+    """Create streaming performance summary pages with box plots.
     
-    Axes flipped: Metric on X-axis, Protocol+Target on Y-axis.
-    Grouped by: Source Protocol, then Contender (Target).
+    Grouped by: Contender and Source Protocol (consolidating all target protocols).
     """
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-    fig.suptitle('Streaming Performance Analysis', fontsize=16, fontweight='bold', y=0.98)
+    # Group streaming data by (contender, source_protocol)
+    grouped_data = {}
     
-    # Group by protocol
-    by_protocol = {}
     for r in streaming_data:
-        protocol = r.get('protocol', 'Unknown')
-        if protocol not in by_protocol:
-            by_protocol[protocol] = []
-        by_protocol[protocol].append(r)
+        contender = r.get('target', 'Unknown')
+        protocol = r.get('protocol', 'OpenAI→OpenAI')
+        source_protocol = get_source_protocol(protocol)
+        
+        key = (contender, source_protocol)
+        if key not in grouped_data:
+            grouped_data[key] = {
+                'tokens_per_sec': [],
+                'ttft': [],
+                'runs': []
+            }
+        
+        # Collect all run data
+        runs = r.get('runs', [])
+        if runs:
+            for run in runs:
+                grouped_data[key]['tokens_per_sec'].append(run.get('tokensPerSec', 0))
+                grouped_data[key]['ttft'].append(run.get('timeToFirstTokenMs', 0))
+        else:
+            # Use aggregated values if no individual runs
+            grouped_data[key]['tokens_per_sec'].append(r.get('tokensPerSec', 0))
+            grouped_data[key]['ttft'].append(r.get('timeToFirstTokenMs', 0))
+        
+        grouped_data[key]['runs'].append(r)
     
-    # Group by source protocol first, then contender (target)
-    protocols = sorted(by_protocol.keys())
-    targets = sorted(set(r['target'] for r in streaming_data))
+    if not grouped_data:
+        return
     
-    # Build Y-axis positions: group by protocol, then target within each protocol
-    y_positions = {}  # (protocol, target) -> y_position
-    y_labels = []  # Labels for Y-axis ticks
-    box_labels = []  # Labels for box plot
-    box_colors = []  # Colors for box plot
+    # Sort keys for consistent ordering
+    sorted_keys = sorted(grouped_data.keys())
+    contenders = sorted(set(k[0] for k in sorted_keys))
+    source_protocols = sorted(set(k[1] for k in sorted_keys))
+    
+    # --- Page 1: Tokens per Second Analysis ---
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    fig.suptitle('Streaming Performance: Tokens per Second', fontsize=16, fontweight='bold', y=0.98)
+    
+    # Build Y-axis positions: group by contender, then source protocol within each contender
+    y_positions = {}
+    y_labels = []
+    box_colors = []
     y_pos = 0
     
-    for protocol in protocols:
-        for target in targets:
-            y_positions[(protocol, target)] = y_pos
-            y_labels.append(f"{protocol} | {target}")
-            box_labels.append(f"{protocol} | {target}")
-            target_idx = targets.index(target)
-            box_colors.append(TARGET_COLORS[target_idx % len(TARGET_COLORS)])
-            y_pos += 1
+    for contender in contenders:
+        for source_protocol in source_protocols:
+            key = (contender, source_protocol)
+            if key in grouped_data:
+                y_positions[key] = y_pos
+                y_labels.append(f"{contender} | {source_protocol}")
+                contender_idx = contenders.index(contender)
+                box_colors.append(CONTENDER_COLORS[contender_idx % len(CONTENDER_COLORS)])
+                y_pos += 1
     
-    # --- Left plot: Scatter plot of individual runs (tokens/sec) ---
-    # With FLIPPED axes: X = tokens/sec, Y = protocol+target position
+    # --- Left plot: Scatter plot of individual runs ---
     all_tokens_per_sec = []
     y_positions_scatter = []
     colors = []
     
-    for protocol in protocols:
-        for target in targets:
-            results = [r for r in by_protocol[protocol] if r['target'] == target]
-            y_base = y_positions[(protocol, target)]
-            for r in results:
-                runs = r.get('runs', [])
-                if not runs:
-                    runs = [{'tokensPerSec': r['tokensPerSec']}]
-                
-                for run in runs:
-                    all_tokens_per_sec.append(run['tokensPerSec'])
-                    y_positions_scatter.append(y_base)
-                    target_idx = targets.index(target)
-                    colors.append(TARGET_COLORS[target_idx % len(TARGET_COLORS)])
+    for contender in contenders:
+        for source_protocol in source_protocols:
+            key = (contender, source_protocol)
+            if key not in grouped_data:
+                continue
+            data = grouped_data[key]
+            y_base = y_positions[key]
+            
+            for value in data['tokens_per_sec']:
+                all_tokens_per_sec.append(value)
+                y_positions_scatter.append(y_base)
+                contender_idx = contenders.index(contender)
+                colors.append(CONTENDER_COLORS[contender_idx % len(CONTENDER_COLORS)])
     
     # Create jitter on Y-axis for better visibility
     jitter = np.random.uniform(-0.15, 0.15, len(y_positions_scatter))
@@ -451,13 +448,16 @@ def create_streaming_summary_page(pdf, streaming_data: list):
     
     ax1.scatter(all_tokens_per_sec, y_jittered, c=colors, alpha=0.6, s=60, edgecolors='black', linewidth=0.5)
     
-    # Add mean lines (vertical now, since axes are flipped)
-    for protocol in protocols:
-        for target in targets:
-            results = [r for r in by_protocol[protocol] if r['target'] == target]
-            y_base = y_positions[(protocol, target)]
-            for r in results:
-                mean_val = r['tokensPerSec']
+    # Add mean lines
+    for contender in contenders:
+        for source_protocol in source_protocols:
+            key = (contender, source_protocol)
+            if key not in grouped_data:
+                continue
+            data = grouped_data[key]
+            y_base = y_positions[key]
+            if data['tokens_per_sec']:
+                mean_val = mean(data['tokens_per_sec'])
                 ax1.vlines(mean_val, y_base - 0.3, y_base + 0.3, colors='red', linestyles='--', linewidth=2, alpha=0.8)
     
     ax1.set_yticks(range(len(y_labels)))
@@ -467,79 +467,81 @@ def create_streaming_summary_page(pdf, streaming_data: list):
     ax1.grid(axis='x', alpha=0.3, linestyle='--')
     ax1.set_axisbelow(True)
     
-    # --- Right plot: Horizontal box plot showing distribution and outliers ---
-    # With FLIPPED axes: horizontal boxes
+    # --- Right plot: Horizontal box plot ---
     box_data = []
+    box_labels_filtered = []
+    box_colors_filtered = []
     
-    for protocol in protocols:
-        for target in targets:
-            results = [r for r in by_protocol[protocol] if r['target'] == target]
-            for r in results:
-                runs = r.get('runs', [])
-                if runs:
-                    values = [run['tokensPerSec'] for run in runs]
-                else:
-                    values = [r['tokensPerSec']]
-                box_data.append(values)
+    for contender in contenders:
+        for source_protocol in source_protocols:
+            key = (contender, source_protocol)
+            if key not in grouped_data:
+                continue
+            data = grouped_data[key]
+            if data['tokens_per_sec']:
+                box_data.append(data['tokens_per_sec'])
+                box_labels_filtered.append(f"{contender} | {source_protocol}")
+                contender_idx = contenders.index(contender)
+                box_colors_filtered.append(CONTENDER_COLORS[contender_idx % len(CONTENDER_COLORS)])
     
-    # Create horizontal box plot (vert=False)
-    bp = ax2.boxplot(box_data, patch_artist=True, tick_labels=box_labels, vert=False)
-    
-    # Color the boxes
-    for patch, color in zip(bp['boxes'], box_colors):
-        patch.set_facecolor(color)
-        patch.set_alpha(0.7)
-    
-    # Style the outliers
-    for flier in bp['fliers']:
-        flier.set(marker='o', color='red', alpha=0.5, markersize=6)
-    
-    ax2.set_yticklabels(box_labels, fontsize=8)
-    ax2.set_xlabel('Tokens per Second', fontsize=11, fontweight='bold')
-    ax2.set_title('Tokens/Sec Distribution (Box Plot)\nOutliers shown as red dots', fontsize=12, fontweight='bold')
-    ax2.grid(axis='x', alpha=0.3, linestyle='--')
-    ax2.set_axisbelow(True)
+    if box_data:
+        bp = ax2.boxplot(box_data, patch_artist=True, tick_labels=box_labels_filtered, vert=False)
+        
+        for patch, color in zip(bp['boxes'], box_colors_filtered):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.7)
+        
+        for flier in bp['fliers']:
+            flier.set(marker='o', color='red', alpha=0.5, markersize=6)
+        
+        ax2.set_yticklabels(box_labels_filtered, fontsize=8)
+        ax2.set_xlabel('Tokens per Second', fontsize=11, fontweight='bold')
+        ax2.set_title('Tokens/Sec Distribution (Box Plot)\nOutliers shown as red dots', fontsize=12, fontweight='bold')
+        ax2.grid(axis='x', alpha=0.3, linestyle='--')
+        ax2.set_axisbelow(True)
     
     plt.tight_layout()
     pdf.savefig(fig, dpi=100)
     plt.close()
     
-    # --- Second page: TTFT analysis ---
+    # --- Page 2: TTFT Analysis ---
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
     fig.suptitle('Time to First Token (TTFT) Analysis', fontsize=16, fontweight='bold', y=0.98)
     
-    # TTFT scatter plot with FLIPPED axes
+    # TTFT scatter plot
     all_ttft = []
     y_positions_scatter = []
     colors = []
     
-    for protocol in protocols:
-        for target in targets:
-            results = [r for r in by_protocol[protocol] if r['target'] == target]
-            y_base = y_positions[(protocol, target)]
-            for r in results:
-                runs = r.get('runs', [])
-                if not runs:
-                    runs = [{'timeToFirstTokenMs': r['timeToFirstTokenMs']}]
-                
-                for run in runs:
-                    all_ttft.append(run['timeToFirstTokenMs'])
-                    y_positions_scatter.append(y_base)
-                    target_idx = targets.index(target)
-                    colors.append(TARGET_COLORS[target_idx % len(TARGET_COLORS)])
+    for contender in contenders:
+        for source_protocol in source_protocols:
+            key = (contender, source_protocol)
+            if key not in grouped_data:
+                continue
+            data = grouped_data[key]
+            y_base = y_positions[key]
+            
+            for value in data['ttft']:
+                all_ttft.append(value)
+                y_positions_scatter.append(y_base)
+                contender_idx = contenders.index(contender)
+                colors.append(CONTENDER_COLORS[contender_idx % len(CONTENDER_COLORS)])
     
     jitter = np.random.uniform(-0.15, 0.15, len(y_positions_scatter))
     y_jittered = [y + j for y, j in zip(y_positions_scatter, jitter)]
     
     ax1.scatter(all_ttft, y_jittered, c=colors, alpha=0.6, s=60, edgecolors='black', linewidth=0.5)
     
-    # Add mean lines (vertical)
-    for protocol in protocols:
-        for target in targets:
-            results = [r for r in by_protocol[protocol] if r['target'] == target]
-            y_base = y_positions[(protocol, target)]
-            for r in results:
-                mean_val = r['timeToFirstTokenMs']
+    # Add mean lines
+    for contender in contenders:
+        for source_protocol in source_protocols:
+            key = (contender, source_protocol)
+            if key not in grouped_data:
+                continue
+            data = grouped_data[key]
+            y_base = y_positions[key]
+            if data['ttft']:
+                mean_val = mean(data['ttft'])
                 ax1.vlines(mean_val, y_base - 0.3, y_base + 0.3, colors='red', linestyles='--', linewidth=2, alpha=0.8)
     
     ax1.set_yticks(range(len(y_labels)))
@@ -551,32 +553,36 @@ def create_streaming_summary_page(pdf, streaming_data: list):
     
     # TTFT horizontal box plot
     box_data = []
+    box_labels_filtered = []
+    box_colors_filtered = []
     
-    for protocol in protocols:
-        for target in targets:
-            results = [r for r in by_protocol[protocol] if r['target'] == target]
-            for r in results:
-                runs = r.get('runs', [])
-                if runs:
-                    values = [run['timeToFirstTokenMs'] for run in runs]
-                else:
-                    values = [r['timeToFirstTokenMs']]
-                box_data.append(values)
+    for contender in contenders:
+        for source_protocol in source_protocols:
+            key = (contender, source_protocol)
+            if key not in grouped_data:
+                continue
+            data = grouped_data[key]
+            if data['ttft']:
+                box_data.append(data['ttft'])
+                box_labels_filtered.append(f"{contender} | {source_protocol}")
+                contender_idx = contenders.index(contender)
+                box_colors_filtered.append(CONTENDER_COLORS[contender_idx % len(CONTENDER_COLORS)])
     
-    bp = ax2.boxplot(box_data, patch_artist=True, tick_labels=box_labels, vert=False)
-    
-    for patch, color in zip(bp['boxes'], box_colors):
-        patch.set_facecolor(color)
-        patch.set_alpha(0.7)
-    
-    for flier in bp['fliers']:
-        flier.set(marker='o', color='red', alpha=0.5, markersize=6)
-    
-    ax2.set_yticklabels(box_labels, fontsize=8)
-    ax2.set_xlabel('Time to First Token (ms)', fontsize=11, fontweight='bold')
-    ax2.set_title('TTFT Distribution (Box Plot)\nOutliers shown as red dots', fontsize=12, fontweight='bold')
-    ax2.grid(axis='x', alpha=0.3, linestyle='--')
-    ax2.set_axisbelow(True)
+    if box_data:
+        bp = ax2.boxplot(box_data, patch_artist=True, tick_labels=box_labels_filtered, vert=False)
+        
+        for patch, color in zip(bp['boxes'], box_colors_filtered):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.7)
+        
+        for flier in bp['fliers']:
+            flier.set(marker='o', color='red', alpha=0.5, markersize=6)
+        
+        ax2.set_yticklabels(box_labels_filtered, fontsize=8)
+        ax2.set_xlabel('Time to First Token (ms)', fontsize=11, fontweight='bold')
+        ax2.set_title('TTFT Distribution (Box Plot)\nOutliers shown as red dots', fontsize=12, fontweight='bold')
+        ax2.grid(axis='x', alpha=0.3, linestyle='--')
+        ax2.set_axisbelow(True)
     
     plt.tight_layout()
     pdf.savefig(fig, dpi=100)

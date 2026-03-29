@@ -17,6 +17,8 @@ export interface ThrottleConfig {
   tokensPerSecond: number;
   /** Whether streaming is enabled */
   streamingEnabled: boolean;
+  /** Whether instant mode is enabled (no latency) */
+  instantMode: boolean;
 }
 
 // Default configuration (can be overridden)
@@ -26,6 +28,7 @@ export const defaultConfig: ThrottleConfig = {
   // Default 1000 tokens/sec for faster benchmarks (10x faster than real-time)
   tokensPerSecond: parseFloat(Bun.env.MOCK_TOKENS_PER_SEC || '1000'),
   streamingEnabled: Bun.env.MOCK_STREAMING_ENABLED !== 'false',
+  instantMode: Bun.env.MOCK_INSTANT_MODE === 'true',
 };
 
 // ============================================================================
@@ -97,7 +100,7 @@ export function calculateLatency(
   config: ThrottleConfig = defaultConfig
 ): number {
   // Instant mode for testing
-  if (Bun.env.MOCK_INSTANT_MODE === 'true') {
+  if (config.instantMode) {
     return 0;
   }
 
@@ -126,7 +129,7 @@ export function calculateStreamingLatency(
   config: ThrottleConfig = defaultConfig
 ): number {
   // Instant mode for testing
-  if (Bun.env.MOCK_INSTANT_MODE === 'true') {
+  if (config.instantMode) {
     return 0;
   }
 
@@ -147,7 +150,7 @@ export function calculateStreamingLatency(
  * Returns the time to wait between tokens based on tokensPerSecond
  */
 export function calculateChunkDelay(config: ThrottleConfig = defaultConfig): number {
-  if (Bun.env.MOCK_INSTANT_MODE === 'true') {
+  if (config.instantMode) {
     return 0;
   }
   return (1 / config.tokensPerSecond) * 1000;

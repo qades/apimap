@@ -30,6 +30,8 @@ interface MockServerConfig {
   latencyStdMs: number;
   tokensPerSecond: number;
   errorRate: number;
+  instantMode: boolean;
+  streamingEnabled: boolean;
 }
 
 interface TargetConfig {
@@ -288,10 +290,12 @@ const DEFAULT_CONFIG: BenchmarkConfig = {
   logErrors: true,
   logDir: './logs',
   mockServerConfig: {
-    latencyMeanMs: parseFloat(Bun.env.MOCK_LATENCY_MEAN_MS || '0'),
-    latencyStdMs: parseFloat(Bun.env.MOCK_LATENCY_STD_MS || '0'),
-    tokensPerSecond: parseFloat(Bun.env.MOCK_TOKENS_PER_SEC || '1000'),
-    errorRate: parseFloat(Bun.env.MOCK_ERROR_RATE || '0'),
+    latencyMeanMs: 0,
+    latencyStdMs: 0,
+    tokensPerSecond: 1000,
+    errorRate: 0,
+    instantMode: false,
+    streamingEnabled: true,
   },
 };
 
@@ -1259,8 +1263,10 @@ BENCHMARK TYPES:
 MOCK SERVER:
     --latency-mean MS       Mean response latency in ms (default: 0)
     --latency-std MS        Latency std dev in ms (default: 0)
-    --tokens-per-sec N      Token generation speed (default: 100)
+    --tokens-per-sec N      Token generation speed (default: 1000)
     --error-rate RATE       Error rate 0.0-1.0 (default: 0)
+    --instant-mode          Enable instant mode (no latency)
+    --mock-streaming        Enable mock server streaming (default: true)
 
 OUTPUT:
     --output DIR            Output directory for results (default: ./results)
@@ -1410,8 +1416,18 @@ function parseScenarioArgs(
 // Main
 // ============================================================================
 
+// List of valid argument names
+const VALID_ARGS = new Set([
+  'litellm-url', 'apimap-url', 'direct-url', 'skip-targets',
+  'concurrency', 'requests', 'prompt-size', 'context-size', 'max-tokens',
+  'latency-mean', 'latency-std', 'tokens-per-sec', 'error-rate',
+  'instant-mode', 'mock-streaming', 'quick', 'full', 'output', 'run-id',
+  'skip-streaming', 'skip-features', 'protocols', 'scenarios', 'no-error-log',
+  'help', 'h',
+]);
+
 async function main() {
-  const { values } = parseArgs({
+  const { values, } = parseArgs({
     args: Bun.argv,
     options: {
       'litellm-url': { type: 'string' },
@@ -1427,6 +1443,8 @@ async function main() {
       'latency-std': { type: 'string' },
       'tokens-per-sec': { type: 'string' },
       'error-rate': { type: 'string' },
+      'instant-mode': { type: 'boolean' },
+      'mock-streaming': { type: 'boolean' },
       'quick': { type: 'boolean' },
       'full': { type: 'boolean' },
       'output': { type: 'string' },
@@ -1441,6 +1459,31 @@ async function main() {
     strict: false,
     allowPositionals: true,
   });
+  
+  // Check for unknown arguments (manual validation since strict:false ignores them)
+  const unknownArgs: string[] = [];
+  for (const arg of Bun.argv) {
+    if (arg.startsWith('--')) {
+      const argName = arg.slice(2).split('=')[0];
+      if (!VALID_ARGS.has(argName)) {
+        unknownArgs.push(arg);
+      }
+    } else if (arg.startsWith('-') && arg.length > 1 && !arg.startsWith('--')) {
+      // Short option (only 'h' is valid)
+      for (const char of arg.slice(1)) {
+        if (char !== 'h' && char !== '-') {
+          unknownArgs.push(arg);
+          break;
+        }
+      }
+    }
+  }
+  
+  if (unknownArgs.length > 0) {
+    console.error(`\n❌ Unknown argument(s): ${unknownArgs.join(', ')}\n`);
+    showHelp();
+    process.exit(1);
+  }
   
   const runId = values['run-id'] as string || new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 
@@ -1500,6 +1543,12 @@ async function main() {
   if (values['error-rate']) {
     config.mockServerConfig.errorRate = parseFloat(values['error-rate'] as string);
   }
+  if (values['instant-mode']) {
+    config.mockServerConfig.instantMode = true;
+  }
+  if (values['mock-streaming'] === false) {
+    config.mockServerConfig.streamingEnabled = false;
+  }
   
   // Handle --quick and --full presets
   const isQuick = !!values['quick'];
@@ -1552,6 +1601,8 @@ async function main() {
   console.log(`  Error logging: ${config.logErrors}`);
   console.log(`  Mock latency: ${config.mockServerConfig.latencyMeanMs}ms ± ${config.mockServerConfig.latencyStdMs}ms`);
   console.log(`  Mock error rate: ${config.mockServerConfig.errorRate}`);
+  console.log(`  Mock streaming: ${config.mockServerConfig.streamingEnabled}`);
+  console.log(`  Mock instant mode: ${config.mockServerConfig.instantMode}`);
   console.log('');
 
   // Check gateways
@@ -1575,6 +1626,33 @@ async function main() {
     if (clients.length === 0) {
       console.error('\n❌ No gateways available for testing!');
       process.exit(1);
+    }
+    
+    // Configure mock server (Direct target) with benchmark settings
+    const directTarget = config.targets.find(t => t.name === 'Direct' && t.enabled);
+    if (directTarget) {
+      try {
+        const resp = await fetch(`${directTarget.url}/admin/config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            errorRate: config.mockServerConfig.errorRate,
+            latencyMeanMs: config.mockServerConfig.latencyMeanMs,
+            latencyStdMs: config.mockServerConfig.latencyStdMs,
+            tokensPerSecond: config.mockServerConfig.tokensPerSecond,
+            streamingEnabled: config.mockServerConfig.streamingEnabled,
+            instantMode: config.mockServerConfig.instantMode,
+          }),
+        });
+        if (resp.ok) {
+          const result = await resp.json() as { config?: { errorRate: number } };
+          console.log(`  Mock server configured: errorRate=${result.config?.errorRate ?? config.mockServerConfig.errorRate}`);
+        } else {
+          console.log(`  ⚠️  Could not configure mock server: HTTP ${resp.status}`);
+        }
+      } catch (err) {
+        console.log(`  ⚠️  Could not configure mock server: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
     
     // Warmup all clients

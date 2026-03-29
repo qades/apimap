@@ -34,20 +34,13 @@ services:
     environment:
       - MOCK_SERVER_PORT=${MOCK_SERVER_PORT:-9999}
       - MOCK_SERVER_HOST=0.0.0.0
-      # Latency configuration (set to 0 for instant mode)
-      # Input processing: fixed at 1000 tokens/sec (1ms/token)
-      # Output generation: configurable (default 1000 tokens/sec for fast benchmarks)
-      - MOCK_LATENCY_MEAN_MS=${MOCK_LATENCY_MEAN_MS:-0}
-      - MOCK_LATENCY_STD_MS=${MOCK_LATENCY_STD_MS:-0}
-      - MOCK_TOKENS_PER_SEC=${MOCK_TOKENS_PER_SEC:-1000}
-      # Set to 'true' for instant mode (no latency at all)
-      - MOCK_INSTANT_MODE=${MOCK_INSTANT_MODE:-false}
-      # Error simulation rate (0.0 - 1.0)
-      - MOCK_ERROR_RATE=${MOCK_ERROR_RATE:-0.01}
-      # Max context length in tokens
-      - MOCK_MAX_CONTEXT=${MOCK_MAX_CONTEXT:-8192}
-      # Enable/disable streaming
-      - MOCK_STREAMING_ENABLED=${MOCK_STREAMING_ENABLED:-true}
+      - MOCK_LATENCY_MEAN_MS=${MOCK_LATENCY_MEAN_MS}
+      - MOCK_LATENCY_STD_MS=${MOCK_LATENCY_STD_MS}
+      - MOCK_TOKENS_PER_SEC=${MOCK_TOKENS_PER_SEC}
+      - MOCK_INSTANT_MODE=${MOCK_INSTANT_MODE}
+      - MOCK_ERROR_RATE=${MOCK_ERROR_RATE}
+      - MOCK_MAX_CONTEXT=${MOCK_MAX_CONTEXT}
+      - MOCK_STREAMING_ENABLED=${MOCK_STREAMING_ENABLED}
     command: >
       sh -c "mkdir -p /app/logs && 
              bun install --frozen-lockfile 2>/dev/null && 
@@ -223,16 +216,6 @@ services:
     environment:
       # All benchmark params have defaults in Dockerfile; override here
       - WAIT_FOR_SERVICES=true
-      #- BENCHMARK_SCENARIOS=${BENCHMARK_SCENARIOS:-1:50,10:100,50:200,100:300}
-      #- BENCHMARK_ALL_PROTOCOLS=${BENCHMARK_ALL_PROTOCOLS:-true}
-      #- BENCHMARK_WARMUP=${BENCHMARK_WARMUP:-5}
-      #- BENCHMARK_PROMPT_SIZE=${BENCHMARK_PROMPT_SIZE:-100}
-      #- BENCHMARK_CONTEXT_SIZE=${BENCHMARK_CONTEXT_SIZE:-0}
-      #- BENCHMARK_MAX_TOKENS=${BENCHMARK_MAX_TOKENS:-50}
-      #- MOCK_LATENCY_MEAN_MS=${MOCK_LATENCY_MEAN_MS:-0}
-      #- MOCK_LATENCY_STD_MS=${MOCK_LATENCY_STD_MS:-0}
-      #- MOCK_TOKENS_PER_SEC=${MOCK_TOKENS_PER_SEC:-1000}
-      #- MOCK_ERROR_RATE=${MOCK_ERROR_RATE:-0}
     # Entrypoint wrapper - handles dependency install and passes through CLI args
     entrypoint: ["/bin/sh", "/app/container-entrypoint.sh"]
     profiles:
