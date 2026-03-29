@@ -36,10 +36,10 @@ services:
       - MOCK_SERVER_HOST=0.0.0.0
       # Latency configuration (set to 0 for instant mode)
       # Input processing: fixed at 1000 tokens/sec (1ms/token)
-      # Output generation: configurable (default 100 tokens/sec)
+      # Output generation: configurable (default 1000 tokens/sec for fast benchmarks)
       - MOCK_LATENCY_MEAN_MS=${MOCK_LATENCY_MEAN_MS:-0}
       - MOCK_LATENCY_STD_MS=${MOCK_LATENCY_STD_MS:-0}
-      - MOCK_TOKENS_PER_SEC=${MOCK_TOKENS_PER_SEC:-100}
+      - MOCK_TOKENS_PER_SEC=${MOCK_TOKENS_PER_SEC:-1000}
       # Set to 'true' for instant mode (no latency at all)
       - MOCK_INSTANT_MODE=${MOCK_INSTANT_MODE:-false}
       # Error simulation rate (0.0 - 1.0)
@@ -230,7 +230,7 @@ services:
       #- BENCHMARK_MAX_TOKENS=${BENCHMARK_MAX_TOKENS:-50}
       #- MOCK_LATENCY_MEAN_MS=${MOCK_LATENCY_MEAN_MS:-0}
       #- MOCK_LATENCY_STD_MS=${MOCK_LATENCY_STD_MS:-0}
-      #- MOCK_TOKENS_PER_SEC=${MOCK_TOKENS_PER_SEC:-100}
+      #- MOCK_TOKENS_PER_SEC=${MOCK_TOKENS_PER_SEC:-1000}
       #- MOCK_ERROR_RATE=${MOCK_ERROR_RATE:-0}
     # Entrypoint wrapper - handles dependency install and passes through CLI args
     entrypoint: ["/bin/sh", "/app/container-entrypoint.sh"]

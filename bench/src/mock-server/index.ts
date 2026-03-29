@@ -20,6 +20,7 @@ import {
   countTokens,
   countMessageTokens,
   calculateLatency,
+  calculateStreamingLatency,
   calculateChunkDelay,
   applyThrottle,
   gaussianRandom,
@@ -226,6 +227,10 @@ function generateRequestId(): string {
 // Re-export throttling functions with config pre-applied
 function localCalculateLatency(inputTokens: number, outputTokens: number): number {
   return calculateLatency(inputTokens, outputTokens, throttleConfig);
+}
+
+function localCalculateStreamingLatency(inputTokens: number): number {
+  return calculateStreamingLatency(inputTokens, throttleConfig);
 }
 
 function localCalculateChunkDelay(): number {
@@ -839,7 +844,10 @@ async function handleOpenAIResponsesRequest(
     const includeReasoning = reasoning?.effort !== undefined;
     
     const inputTokens = countInputTokens(input);
-    const latency = localCalculateLatency(inputTokens, maxTokens);
+    // For streaming, only apply input latency; output is distributed across chunks
+    const latency = stream && config.streamingEnabled
+      ? localCalculateStreamingLatency(inputTokens)
+      : localCalculateLatency(inputTokens, maxTokens);
     await sleep(latency);
     
     if (stream && config.streamingEnabled) {
@@ -1344,7 +1352,10 @@ async function handleOpenAIRequest(
     const seed = body.seed !== undefined ? Number(body.seed) : undefined;
     
     const inputTokens = countMessageTokens(messages);
-    const latency = localCalculateLatency(inputTokens, maxTokens);
+    // For streaming, only apply input latency; output is distributed across chunks
+    const latency = stream && config.streamingEnabled
+      ? localCalculateStreamingLatency(inputTokens)
+      : localCalculateLatency(inputTokens, maxTokens);
     await sleep(latency);
     
     if (stream && config.streamingEnabled) {
@@ -1482,7 +1493,10 @@ async function handleLegacyCompletionsRequest(
     const inputTokens = Array.isArray(prompt) 
       ? prompt.reduce((sum, p) => sum + countTokens(p), 0)
       : countTokens(prompt);
-    const latency = calculateLatency(inputTokens, maxTokens);
+    // For streaming, only apply input latency; output is distributed across chunks
+    const latency = stream && config.streamingEnabled
+      ? calculateStreamingLatency(inputTokens, throttleConfig)
+      : calculateLatency(inputTokens, maxTokens, throttleConfig);
     await sleep(latency);
     
     if (stream && config.streamingEnabled) {
@@ -1684,7 +1698,10 @@ async function handleAnthropicRequest(
     const enableThinking = thinking?.type === 'enabled';
     
     const inputTokens = countMessageTokens(messages);
-    const latency = localCalculateLatency(inputTokens, maxTokens);
+    // For streaming, only apply input latency; output is distributed across chunks
+    const latency = stream && config.streamingEnabled
+      ? localCalculateStreamingLatency(inputTokens)
+      : localCalculateLatency(inputTokens, maxTokens);
     await sleep(latency);
     
     if (stream && config.streamingEnabled) {
@@ -1782,7 +1799,12 @@ async function handleDeepSeekRequest(
     const enableThinking = chatTemplateKwargs?.enable_thinking === true || 
                           (body.thinking as Record<string, unknown>)?.type === 'enabled';
     
-    await sleep(localCalculateLatency(countMessageTokens(messages), maxTokens));
+    const inputTokens = countMessageTokens(messages);
+    // For streaming, only apply input latency; output is distributed across chunks
+    const latency = stream && config.streamingEnabled
+      ? localCalculateStreamingLatency(inputTokens)
+      : localCalculateLatency(inputTokens, maxTokens);
+    await sleep(latency);
     
     if (stream && config.streamingEnabled) {
       const generator = openAIStreamGenerator(

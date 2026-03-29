@@ -282,7 +282,7 @@ const DEFAULT_CONFIG: BenchmarkConfig = {
   mockServerConfig: {
     latencyMeanMs: parseFloat(Bun.env.MOCK_LATENCY_MEAN_MS || '0'),
     latencyStdMs: parseFloat(Bun.env.MOCK_LATENCY_STD_MS || '0'),
-    tokensPerSecond: parseFloat(Bun.env.MOCK_TOKENS_PER_SEC || '100'),
+    tokensPerSecond: parseFloat(Bun.env.MOCK_TOKENS_PER_SEC || '1000'),
     errorRate: parseFloat(Bun.env.MOCK_ERROR_RATE || '0'),
   },
 };

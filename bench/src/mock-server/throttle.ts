@@ -23,7 +23,8 @@ export interface ThrottleConfig {
 export const defaultConfig: ThrottleConfig = {
   latencyMeanMs: parseFloat(Bun.env.MOCK_LATENCY_MEAN_MS || '0'),
   latencyStdMs: parseFloat(Bun.env.MOCK_LATENCY_STD_MS || '0'),
-  tokensPerSecond: parseFloat(Bun.env.MOCK_TOKENS_PER_SEC || '100'),
+  // Default 1000 tokens/sec for faster benchmarks (10x faster than real-time)
+  tokensPerSecond: parseFloat(Bun.env.MOCK_TOKENS_PER_SEC || '1000'),
   streamingEnabled: Bun.env.MOCK_STREAMING_ENABLED !== 'false',
 };
 
@@ -112,6 +113,32 @@ export function calculateLatency(
     : 0;
 
   return inputLatency + outputLatency + baseLatency;
+}
+
+/**
+ * Calculate simulated latency for streaming requests
+ * 
+ * For streaming, only input processing + base latency is applied upfront.
+ * Output generation delay is distributed across chunks (see calculateChunkDelay).
+ */
+export function calculateStreamingLatency(
+  inputTokens: number,
+  config: ThrottleConfig = defaultConfig
+): number {
+  // Instant mode for testing
+  if (Bun.env.MOCK_INSTANT_MODE === 'true') {
+    return 0;
+  }
+
+  // Input processing: ~1ms per token (1 second per 1000 tokens)
+  const inputLatency = inputTokens;
+
+  // Base latency with Gaussian jitter (network/processing overhead)
+  const baseLatency = config.latencyMeanMs > 0
+    ? Math.max(0, gaussianRandom(config.latencyMeanMs, config.latencyStdMs))
+    : 0;
+
+  return inputLatency + baseLatency;
 }
 
 /**
