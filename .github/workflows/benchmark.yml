@@ -1,15 +1,8 @@
 name: Benchmark
 
 on:
-  # Run on pushes to main/master that affect relevant paths
-  push:
-    branches: [main, master]
-    paths:
-      - 'bench/**'
-      - 'src/**'
-      - 'Dockerfile'
-      - '.github/workflows/benchmark.yml'
-  # Also trigger after CI workflow completes successfully on main/master
+  # Trigger after CI workflow completes successfully on main/master
+  # This ensures the Docker image is available before running benchmarks
   workflow_run:
     workflows: [CI]
     branches: [main, master]
@@ -57,22 +50,18 @@ jobs:
     - name: Determine image source
       id: set-image
       run: |
-        # Use CI image on push to main/master (after CI completes), or when manually requested
+        # Use CI image after CI completes successfully, or when manually requested
         # Use full SHA for guaranteed uniqueness
         if [[ "${{ github.event_name }}" == "workflow_run" && "${{ github.event.workflow_run.conclusion }}" == "success" ]]; then
           echo "use_ci_image=true" >> $GITHUB_OUTPUT
           echo "image_tag=ghcr.io/${{ github.repository }}:${{ github.sha }}" >> $GITHUB_OUTPUT
           echo "Using CI-built image from ghcr.io (SHA: ${{ github.sha }})"
-        elif [[ "${{ github.event_name }}" == "push" && ("${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/master") ]]; then
-          # Push to main - try to use CI image if available
-          echo "use_ci_image=true" >> $GITHUB_OUTPUT
-          echo "image_tag=ghcr.io/${{ github.repository }}:${{ github.sha }}" >> $GITHUB_OUTPUT
-          echo "Using CI-built image from ghcr.io (SHA: ${{ github.sha }})"
-        elif [[ "${{ inputs.use_ci_image }}" == "true" ]]; then
+        elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.use_ci_image }}" == "true" ]]; then
           echo "use_ci_image=true" >> $GITHUB_OUTPUT
           echo "image_tag=ghcr.io/${{ github.repository }}:${{ github.sha }}" >> $GITHUB_OUTPUT
           echo "Using CI-built image from ghcr.io (SHA: ${{ github.sha }}, manual)"
         else
+          # PR, schedule, or manual without use_ci_image: build from source
           echo "use_ci_image=false" >> $GITHUB_OUTPUT
           echo "image_tag=apimap:benchmark-test" >> $GITHUB_OUTPUT
           echo "Will build image from source"
@@ -148,7 +137,7 @@ jobs:
     needs: [prepare-image, pull-ci-image]
     if: |
       needs.prepare-image.outputs.use_ci_image == 'true' && 
-      (github.event_name == 'push' || github.event_name == 'workflow_run' || 
+      (github.event_name == 'workflow_run' || 
        (github.event_name == 'workflow_dispatch' && inputs.benchmark_type == 'full'))
 
     steps:
@@ -593,7 +582,7 @@ jobs:
   # Build and push benchmark images
   build-benchmark-images:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
     permissions:
       contents: read
       packages: write
