@@ -54,23 +54,29 @@ jobs:
       use_ci_image: ${{ steps.set-image.outputs.use_ci_image }}
       
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
     - name: Determine image source
       id: set-image
       run: |
+        # Get short SHA (7 characters) to match docker/metadata-action format
+        SHORT_SHA=$(git rev-parse --short HEAD)
+        
         # Use CI image on push to main/master (after CI completes), or when manually requested
         if [[ "${{ github.event_name }}" == "workflow_run" && "${{ github.event.workflow_run.conclusion }}" == "success" ]]; then
           echo "use_ci_image=true" >> $GITHUB_OUTPUT
-          echo "image_tag=ghcr.io/${{ github.repository }}:${{ github.sha }}" >> $GITHUB_OUTPUT
-          echo "Using CI-built image from ghcr.io"
+          echo "image_tag=ghcr.io/${{ github.repository }}:${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "Using CI-built image from ghcr.io (SHA: ${SHORT_SHA})"
         elif [[ "${{ github.event_name }}" == "push" && ("${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/master") ]]; then
           # Push to main - try to use CI image if available
           echo "use_ci_image=true" >> $GITHUB_OUTPUT
-          echo "image_tag=ghcr.io/${{ github.repository }}:${{ github.sha }}" >> $GITHUB_OUTPUT
-          echo "Using CI-built image from ghcr.io"
+          echo "image_tag=ghcr.io/${{ github.repository }}:${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "Using CI-built image from ghcr.io (SHA: ${SHORT_SHA})"
         elif [[ "${{ inputs.use_ci_image }}" == "true" ]]; then
           echo "use_ci_image=true" >> $GITHUB_OUTPUT
-          echo "image_tag=ghcr.io/${{ github.repository }}:${{ github.sha }}" >> $GITHUB_OUTPUT
-          echo "Using CI-built image from ghcr.io (manual)"
+          echo "image_tag=ghcr.io/${{ github.repository }}:${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "Using CI-built image from ghcr.io (SHA: ${SHORT_SHA}, manual)"
         else
           echo "use_ci_image=false" >> $GITHUB_OUTPUT
           echo "image_tag=apimap:benchmark-test" >> $GITHUB_OUTPUT
