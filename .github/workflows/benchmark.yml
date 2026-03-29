@@ -93,6 +93,11 @@ jobs:
       run: |
         docker load < /tmp/apimap-benchmark.tar
 
+    - name: Create logs directory with proper permissions
+      run: |
+        mkdir -p bench/logs
+        chmod -R 777 bench/logs
+
     - name: Start services and run quick benchmark
       run: |
         cd bench
@@ -249,6 +254,11 @@ jobs:
     - name: Load API Map image
       run: |
         docker load < /tmp/apimap-benchmark.tar
+
+    - name: Create logs directory with proper permissions
+      run: |
+        mkdir -p bench/logs
+        chmod -R 777 bench/logs
 
     - name: Start services and run full benchmark
       run: |
