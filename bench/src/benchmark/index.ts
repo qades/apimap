@@ -1251,16 +1251,11 @@ SCENARIOS:
     --max-tokens N          Max tokens in response (default: 50)
 
 BENCHMARK TYPES:
+    --quick                 Quick test: OpenAI→OpenAI only, 2 scenarios (default)
+    --full                  Full benchmark: all 16 protocol combinations, 4 scenarios
+    --protocols MODE        Protocol tests: 'all', 'openai', 'anthropic' (default: openai)
     --skip-streaming        Skip streaming benchmarks
     --skip-features         Skip feature comparison
-    --protocols MODE        Protocol tests: 'all' (default), 'openai', 'anthropic'
-    --quick                 Quick mode: test only OpenAI→OpenAI with fewer requests
-
-ENVIRONMENT VARIABLES:
-    BENCHMARK_ALL_PROTOCOLS   Test all 16 protocol combinations (default: true)
-                              Set to 'false' for OpenAI→OpenAI only
-    BENCHMARK_PROMPT_SIZE     Prompt size in characters (default: 100)
-    BENCHMARK_MAX_TOKENS      Max tokens in response (default: 500)
 
 MOCK SERVER:
     --latency-mean MS       Mean response latency in ms (default: 0)
@@ -1278,15 +1273,18 @@ OTHER:
     --help, -h              Show this help
 
 EXAMPLES:
-    # Default benchmark (all 3 targets)
+    # Quick benchmark (default): OpenAI→OpenAI only, 2 scenarios
     bun run benchmark
+    bun run benchmark --quick
 
-    # Full benchmark with ALL protocol combinations (16 transformations)
-    bun run benchmark        # BENCHMARK_ALL_PROTOCOLS defaults to true
-    BENCHMARK_ALL_PROTOCOLS=true bun run benchmark
+    # Full benchmark: all 16 protocol combinations, 4 scenarios
+    bun run benchmark --full
 
-    # Test only OpenAI→OpenAI (fastest)
-    BENCHMARK_ALL_PROTOCOLS=false bun run benchmark
+    # Test all protocols (same as --full)
+    bun run benchmark --protocols all
+
+    # Test OpenAI→OpenAI only (same as default)
+    bun run benchmark --protocols openai
 
     # Test with 0% error rate
     bun run benchmark --error-rate 0
@@ -1300,13 +1298,10 @@ EXAMPLES:
     # Test with specific concurrency levels
     bun run benchmark --concurrency 1,5,10 --requests 10,50,100
 
-    # Quick validation test (OpenAI→OpenAI only, 2 scenarios)
-    bun run benchmark --quick
-
     # Named run for easier identification
     bun run benchmark --run-id stress-test-100-concurrent
 
-PROTOCOL COMBINATIONS TESTED (when BENCHMARK_ALL_PROTOCOLS=true):
+PROTOCOL COMBINATIONS TESTED (with --all-protocols or --full):
     OpenAI Chat → OpenAI Chat, Anthropic, Responses, Completions
     Anthropic   → OpenAI Chat, Anthropic, Responses, Completions
     Responses   → OpenAI Chat, Anthropic, Responses, Completions
@@ -1326,13 +1321,15 @@ function parseScenarioArgs(
   contextSizeArg?: string,
   maxTokensArg?: string,
   protocolsArg?: string,
+  allProtocols?: boolean,
+  isQuick?: boolean,
 ): ScenarioConfig[] {
-  // Parse protocols to test (--protocols takes precedence)
+  // Parse protocols to test (--protocols takes precedence, then --all-protocols)
   const testProtocols = protocolsArg === 'openai'
     ? [PROTOCOL_COMBINATIONS[0]!]
     : protocolsArg === 'anthropic'
-    ? [PROTOCOL_COMBINATIONS[1]!]
-    : protocolsArg
+    ? [PROTOCOL_COMBINATIONS[4]!]
+    : protocolsArg === 'all' || allProtocols
     ? PROTOCOL_COMBINATIONS
     : [PROTOCOL_COMBINATIONS[0]!]; // default to OpenAI→OpenAI only
   
@@ -1364,12 +1361,19 @@ function parseScenarioArgs(
   }
   
   // Otherwise use --concurrency and --requests separately
+  // --quick: 2 light scenarios
+  // --full: 4 scenarios with all protocols, more requests
+  // default: 4 scenarios
   const concurrencyLevels = concurrencyArg 
     ? concurrencyArg.split(',').map(c => parseInt(c.trim()))
+    : isQuick 
+    ? [1, 10]
     : [1, 10, 50, 100];
     
   const requestCounts = requestsArg
     ? requestsArg.split(',').map(r => parseInt(r.trim()))
+    : isQuick
+    ? [10, 20]
     : [50, 100, 200, 300];
     
   const promptSize = promptSizeArg ? parseInt(promptSizeArg) : 100;
@@ -1425,6 +1429,7 @@ async function main() {
       'tokens-per-sec': { type: 'string' },
       'error-rate': { type: 'string' },
       'quick': { type: 'boolean' },
+      'full': { type: 'boolean' },
       'output': { type: 'string' },
       'run-id': { type: 'string' },
       'skip-streaming': { type: 'boolean' },
@@ -1497,6 +1502,11 @@ async function main() {
     config.mockServerConfig.errorRate = parseFloat(values['error-rate'] as string);
   }
   
+  // Handle --quick and --full presets
+  const isQuick = !!values['quick'];
+  const isFull = !!values['full'];
+  const useAllProtocols = values['protocols'] === 'all' || isFull;
+  
   config.scenarios = parseScenarioArgs(
     values['scenarios'] as string | undefined,
     values['concurrency'] as string | undefined,
@@ -1505,6 +1515,8 @@ async function main() {
     values['context-size'] as string | undefined,
     values['max-tokens'] as string | undefined,
     values['protocols'] as string | undefined,
+    useAllProtocols,
+    isQuick,
   );
   
   if (values['quick']) {
