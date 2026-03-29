@@ -10,6 +10,12 @@ import type { ProviderRequest } from "../types.ts";
  * Has its own chat format with chat_history field
  */
 export class CohereProvider extends BaseProvider {
+  static override readonly supportedFormats = ["cohere-chat", "openai-chat"];
+  static override readonly endpoints = [
+    { method: "POST", path: "/v1/chat", format: "cohere-chat", description: "Cohere chat" },
+    { method: "POST", path: "/v1/generate", format: "cohere-chat", description: "Cohere generate (legacy)" },
+  ];
+
   /**
    * Cohere uses /chat endpoint for chat completions
    */

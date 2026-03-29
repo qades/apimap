@@ -1,0 +1,62 @@
+{
+  "timestamp": "2026-03-28T18:28:40.718Z",
+  "requestId": "mnanyt1q_o4m2xi844",
+  "method": "POST",
+  "path": "/v1/messages",
+  "sourceScheme": "anthropic-messages",
+  "targetScheme": "openai-chat",
+  "provider": "llamacpp",
+  "model": "test",
+  "targetModel": "MARTHA-0.8B-Q4_K_M",
+  "requestHeaders": {
+    "accept": "*/*",
+    "accept-encoding": "gzip, deflate",
+    "accept-language": "en-US,en;q=0.9,de;q=0.8",
+    "connection": "keep-alive",
+    "content-length": "160",
+    "content-type": "application/json",
+    "host": "mk-x2:3456",
+    "origin": "http://mk-x2:3001",
+    "referer": "http://mk-x2:3001/",
+    "sec-gpc": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+  },
+  "requestBody": {
+    "model": "test",
+    "max_tokens": 1024,
+    "temperature": 0.7,
+    "stream": true,
+    "messages": [
+      {
+        "role": "user",
+        "content": "test"
+      }
+    ],
+    "chat_template_kwargs": {
+      "enable_thinking": true
+    }
+  },
+  "transformedBody": {
+    "model": "MARTHA-0.8B-Q4_K_M",
+    "messages": [
+      {
+        "role": "user",
+        "content": "test"
+      }
+    ],
+    "max_tokens": 1024,
+    "temperature": 0.7,
+    "stream": true,
+    "chat_template_kwargs": {
+      "enable_thinking": true
+    }
+  },
+  "responseStatus": 200,
+  "durationMs": 4516,
+  "routed": true,
+  "matchedPattern": "test",
+  "responseBody": {
+    "type": "streaming",
+    "chunkCount": 1025
+  }
+}

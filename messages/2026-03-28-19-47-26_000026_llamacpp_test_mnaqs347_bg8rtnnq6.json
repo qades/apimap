@@ -1,0 +1,128 @@
+{
+  "timestamp": "2026-03-28T19:47:26.023Z",
+  "requestId": "mnaqs347_bg8rtnnq6",
+  "method": "POST",
+  "path": "/v1/messages",
+  "sourceScheme": "anthropic-messages",
+  "targetScheme": "openai-chat",
+  "provider": "llamacpp",
+  "model": "test",
+  "targetModel": "MARTHA-0.8B-Q4_K_M",
+  "requestHeaders": {
+    "accept": "*/*",
+    "accept-encoding": "gzip, deflate",
+    "accept-language": "en-US,en;q=0.9,de;q=0.8",
+    "connection": "keep-alive",
+    "content-length": "162",
+    "content-type": "application/json",
+    "host": "mk-x2:3456",
+    "origin": "http://mk-x2:3001",
+    "referer": "http://mk-x2:3001/",
+    "sec-gpc": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+  },
+  "requestBody": {
+    "model": "test",
+    "max_tokens": 1024,
+    "temperature": 0.1,
+    "stream": false,
+    "messages": [
+      {
+        "role": "user",
+        "content": "ping"
+      }
+    ],
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    }
+  },
+  "transformedBody": {
+    "model": "MARTHA-0.8B-Q4_K_M",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ping"
+      }
+    ],
+    "max_tokens": 1024,
+    "temperature": 0.1,
+    "stream": false,
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    }
+  },
+  "responseStatus": 200,
+  "durationMs": 766,
+  "routed": true,
+  "matchedPattern": "test",
+  "rawUpstreamResponse": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "I can't ping (ping) directly, but I can help you with it!\n\n**What can I do?**\n*   **Check your connection:** I can tell you if your computer is connected to the internet.\n*   **Check your IP address:** I can show you your public IP address, which helps you identify where you are on the internet.\n*   **Check DNS:** I can tell you which DNS server is being used (e.g., 8.8.8.8, 1.1.1.1).\n*   **Check for errors:** I can tell you if you're getting a connection error (like a \"Connection refused\" or \"DNS timeout\").\n\n**How do I use it?**\nJust tell me what you need, and I'll give you the answer!"
+        }
+      }
+    ],
+    "created": 1774727246,
+    "model": "MARTHA-0.8B-Q4_K_M",
+    "system_fingerprint": "b8480-8cb398ee6",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 169,
+      "prompt_tokens": 13,
+      "total_tokens": 182,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "id": "chatcmpl-5ZPgXPWLo4m9ZVwgQihV3r9t1Offj4MK",
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 13,
+      "prompt_ms": 14.659,
+      "prompt_per_token_ms": 1.1276153846153847,
+      "prompt_per_second": 886.8272051299542,
+      "predicted_n": 169,
+      "predicted_ms": 735.765,
+      "predicted_per_token_ms": 4.353639053254438,
+      "predicted_per_second": 229.69290466385326
+    }
+  },
+  "transformedResponse": {
+    "id": "chatcmpl-5ZPgXPWLo4m9ZVwgQihV3r9t1Offj4MK",
+    "type": "message",
+    "role": "assistant",
+    "model": "MARTHA-0.8B-Q4_K_M",
+    "content": [
+      {
+        "type": "text",
+        "text": "I can't ping (ping) directly, but I can help you with it!\n\n**What can I do?**\n*   **Check your connection:** I can tell you if your computer is connected to the internet.\n*   **Check your IP address:** I can show you your public IP address, which helps you identify where you are on the internet.\n*   **Check DNS:** I can tell you which DNS server is being used (e.g., 8.8.8.8, 1.1.1.1).\n*   **Check for errors:** I can tell you if you're getting a connection error (like a \"Connection refused\" or \"DNS timeout\").\n\n**How do I use it?**\nJust tell me what you need, and I'll give you the answer!"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "usage": {
+      "input_tokens": 13,
+      "output_tokens": 169
+    }
+  },
+  "responseBody": {
+    "id": "chatcmpl-5ZPgXPWLo4m9ZVwgQihV3r9t1Offj4MK",
+    "type": "message",
+    "role": "assistant",
+    "model": "MARTHA-0.8B-Q4_K_M",
+    "content": [
+      {
+        "type": "text",
+        "text": "I can't ping (ping) directly, but I can help you with it!\n\n**What can I do?**\n*   **Check your connection:** I can tell you if your computer is connected to the internet.\n*   **Check your IP address:** I can show you your public IP address, which helps you identify where you are on the internet.\n*   **Check DNS:** I can tell you which DNS server is being used (e.g., 8.8.8.8, 1.1.1.1).\n*   **Check for errors:** I can tell you if you're getting a connection error (like a \"Connection refused\" or \"DNS timeout\").\n\n**How do I use it?**\nJust tell me what you need, and I'll give you the answer!"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "usage": {
+      "input_tokens": 13,
+      "output_tokens": 169
+    }
+  }
+}

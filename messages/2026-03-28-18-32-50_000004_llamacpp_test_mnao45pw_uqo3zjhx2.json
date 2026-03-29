@@ -1,0 +1,49 @@
+{
+  "timestamp": "2026-03-28T18:32:50.420Z",
+  "requestId": "mnao45pw_uqo3zjhx2",
+  "method": "POST",
+  "path": "/v1/chat/completions",
+  "sourceScheme": "openai-chat",
+  "targetScheme": "openai-chat",
+  "provider": "llamacpp",
+  "model": "test",
+  "targetModel": "MARTHA-0.8B-Q4_K_M",
+  "requestHeaders": {
+    "accept": "*/*",
+    "content-length": "92",
+    "content-type": "application/json",
+    "host": "localhost:3456",
+    "user-agent": "curl/8.18.0"
+  },
+  "requestBody": {
+    "model": "test",
+    "messages": [
+      {
+        "role": "user",
+        "content": "test"
+      }
+    ],
+    "max_tokens": 50,
+    "stream": true
+  },
+  "transformedBody": {
+    "model": "MARTHA-0.8B-Q4_K_M",
+    "messages": [
+      {
+        "role": "user",
+        "content": "test"
+      }
+    ],
+    "max_tokens": 50,
+    "stream": true
+  },
+  "responseStatus": 200,
+  "durationMs": 206,
+  "routed": true,
+  "matchedPattern": "test",
+  "responseBody": {
+    "type": "streaming",
+    "chunkCount": 42,
+    "aborted": true
+  }
+}

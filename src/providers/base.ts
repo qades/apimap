@@ -11,15 +11,60 @@ import type {
 } from "../types/internal.ts";
 
 /**
+ * Provider endpoint metadata
+ */
+export interface ProviderEndpoint {
+  method: string;
+  path: string;
+  format: string;
+  description?: string;
+}
+
+/**
+ * Provider metadata for introspection
+ */
+export interface ProviderMetadata {
+  /** Supported API formats */
+  formats: string[];
+  /** Egress endpoints this provider calls */
+  endpoints: ProviderEndpoint[];
+  /** Implementation class name */
+  implementation: string;
+  /** Whether provider uses native vs OpenAI-compatible API */
+  nativeApi: boolean;
+}
+
+/**
  * Abstract base class for all providers
  */
 export abstract class BaseProvider {
   protected config: ProviderConfig;
   public readonly id: string;
 
+  /** Supported formats - override in subclasses */
+  static readonly supportedFormats: string[] = ["openai-chat"];
+  
+  /** Egress endpoints - override in subclasses */
+  static readonly endpoints: ProviderEndpoint[] = [
+    { method: "POST", path: "/v1/chat/completions", format: "openai-chat" },
+  ];
+
   constructor(id: string, config: ProviderConfig) {
     this.id = id;
     this.config = config;
+  }
+
+  /**
+   * Get provider metadata for introspection
+   */
+  getMetadata(): ProviderMetadata {
+    const ctor = this.constructor as typeof BaseProvider;
+    return {
+      formats: ctor.supportedFormats,
+      endpoints: ctor.endpoints,
+      implementation: this.constructor.name,
+      nativeApi: this.constructor.name === "OpenAICompatibleProvider",
+    };
   }
 
   /**

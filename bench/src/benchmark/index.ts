@@ -74,10 +74,29 @@ interface ProtocolCombination {
 }
 
 const PROTOCOL_COMBINATIONS: ProtocolCombination[] = [
+  // OpenAI Chat Completions as source
   { sourceFormat: 'openai-chat', targetFormat: 'openai-chat', description: 'OpenAI→OpenAI' },
+  { sourceFormat: 'openai-chat', targetFormat: 'anthropic-messages', description: 'OpenAI→Anthropic' },
+  { sourceFormat: 'openai-chat', targetFormat: 'openai-responses', description: 'OpenAI→Responses' },
+  { sourceFormat: 'openai-chat', targetFormat: 'openai-completions', description: 'OpenAI→Completions' },
+  
+  // Anthropic Messages as source
   { sourceFormat: 'anthropic-messages', targetFormat: 'openai-chat', description: 'Anthropic→OpenAI' },
+  { sourceFormat: 'anthropic-messages', targetFormat: 'anthropic-messages', description: 'Anthropic→Anthropic' },
+  { sourceFormat: 'anthropic-messages', targetFormat: 'openai-responses', description: 'Anthropic→Responses' },
+  { sourceFormat: 'anthropic-messages', targetFormat: 'openai-completions', description: 'Anthropic→Completions' },
+  
+  // OpenAI Responses as source
   { sourceFormat: 'openai-responses', targetFormat: 'openai-chat', description: 'Responses→OpenAI' },
+  { sourceFormat: 'openai-responses', targetFormat: 'anthropic-messages', description: 'Responses→Anthropic' },
+  { sourceFormat: 'openai-responses', targetFormat: 'openai-responses', description: 'Responses→Responses' },
+  { sourceFormat: 'openai-responses', targetFormat: 'openai-completions', description: 'Responses→Completions' },
+  
+  // OpenAI Legacy Completions as source
   { sourceFormat: 'openai-completions', targetFormat: 'openai-chat', description: 'Completions→OpenAI' },
+  { sourceFormat: 'openai-completions', targetFormat: 'anthropic-messages', description: 'Completions→Anthropic' },
+  { sourceFormat: 'openai-completions', targetFormat: 'openai-responses', description: 'Completions→Responses' },
+  { sourceFormat: 'openai-completions', targetFormat: 'openai-completions', description: 'Completions→Completions' },
 ];
 
 interface LatencyResult {
@@ -311,9 +330,9 @@ class DockerComposeManager {
 
   private async waitForServices(): Promise<void> {
     const services = [
-      { name: 'Mock Server', url: 'http://localhost:9999/health' },
-      { name: 'LiteLLM', url: 'http://localhost:4000/v1/models', headers: { 'Authorization': 'Bearer sk-test-key' } },
-      { name: 'API Map', url: 'http://localhost:3000/v1/models', headers: { 'Authorization': 'Bearer test-key' } },
+      { name: 'Mock Server', url: `${Bun.env.MOCK_SERVER_DIRECT_URL || 'http://localhost:9999'}/health` },
+      { name: 'LiteLLM', url: `${Bun.env.LITELLM_URL || 'http://localhost:4000'}/health/liveliness`, headers: { 'Authorization': `Bearer ${Bun.env.LITELLM_API_KEY || 'sk-test-key'}` } },
+      { name: 'API Map', url: `${Bun.env.APIMAP_URL || 'http://localhost:3000'}/v1/models`, headers: { 'Authorization': `Bearer ${Bun.env.APIMAP_API_KEY || 'test-key'}` } },
     ];
 
     for (const service of services) {
@@ -401,7 +420,7 @@ const DEFAULT_CONFIG: BenchmarkConfig = {
     },
     {
       name: 'Direct',
-      url: Bun.env.MOCK_SERVER_URL || 'http://localhost:9999',
+      url: Bun.env.MOCK_SERVER_DIRECT_URL || 'http://localhost:9999',
       apiKey: 'test-key',
       enabled: true,
     },
@@ -422,12 +441,15 @@ const DEFAULT_CONFIG: BenchmarkConfig = {
 };
 
 function parseScenarios(env?: string): ScenarioConfig[] {
+  console.log('[DEBUG] BENCHMARK_SCENARIOS env:', Bun.env.BENCHMARK_SCENARIOS, 'arg:', env);
   const promptSize = parseInt(Bun.env.BENCHMARK_PROMPT_SIZE || '100');
   const contextSize = parseInt(Bun.env.BENCHMARK_CONTEXT_SIZE || '0');
   const maxTokens = parseInt(Bun.env.BENCHMARK_MAX_TOKENS || '500');
   
-  // DEFAULT_CONFIG only uses openai protocol (backward compatibility)
-  const testProtocols = [PROTOCOL_COMBINATIONS[0]!];
+  // By default, test all protocol combinations for full coverage
+  // Set BENCHMARK_ALL_PROTOCOLS=false to test only OpenAI→OpenAI
+  const testAllProtocols = Bun.env.BENCHMARK_ALL_PROTOCOLS !== 'false';
+  const testProtocols = testAllProtocols ? PROTOCOL_COMBINATIONS : [PROTOCOL_COMBINATIONS[0]!];
   
   let baseScenarios: Array<{name: string, concurrency: number, requests: number}>;
   
@@ -516,7 +538,9 @@ class GatewayClient {
 
   async healthCheck(): Promise<boolean> {
     try {
-      const resp = await fetch(`${this.url}/v1/models`, {
+      // LiteLLM's /v1/models requires a DB connection; use its liveliness endpoint instead
+      const path = this.name.toLowerCase() === 'litellm' ? '/health/liveliness' : '/v1/models';
+      const resp = await fetch(`${this.url}${path}`, {
         headers: { 'Authorization': `Bearer ${this.apiKey}` },
         signal: AbortSignal.timeout(5000),
       });
@@ -726,14 +750,24 @@ class GatewayClient {
           try {
             const data = JSON.parse(line.slice(6));
             
-            // Handle OpenAI format
+            // Handle OpenAI chat format
             if (data.choices?.[0]?.delta?.content) {
               totalTokens += data.choices[0].delta.content.split(/\s+/).length;
+            }
+            
+            // Handle OpenAI legacy completions format (uses 'text' instead of 'delta.content')
+            if (data.choices?.[0]?.text) {
+              totalTokens += data.choices[0].text.split(/\s+/).length;
             }
             
             // Handle Anthropic format
             if (data.type === 'content_block_delta' && data.delta?.text) {
               totalTokens += data.delta.text.split(/\s+/).length;
+            }
+            
+            // Handle OpenAI Responses API streaming format
+            if (data.type === 'response.output_text.delta' && data.delta) {
+              totalTokens += data.delta.split(/\s+/).length;
             }
           } catch {
             // Ignore parse errors
@@ -775,6 +809,14 @@ class GatewayClient {
 // Benchmark Functions
 // ============================================================================
 
+function getModelForProtocol(protocol?: ProtocolCombination): string {
+  // Use Claude model when target format is Anthropic, otherwise use GPT
+  if (protocol?.targetFormat === 'anthropic-messages') {
+    return 'claude-3-haiku';
+  }
+  return 'gpt-4o-mini';
+}
+
 async function runWarmup(client: GatewayClient, config: BenchmarkConfig, errorLogger?: ErrorLogger): Promise<void> {
   console.log(`  Warming up ${client.getName()}...`);
   const messages = buildMessages('Hello', '');
@@ -801,9 +843,11 @@ async function benchmarkLatency(
   const latencies: number[] = [];
   let errors = 0;
   
+  const model = getModelForProtocol(scenario.protocol);
+  
   for (let i = 0; i < scenario.requests; i++) {
     const result = await client.chatCompletion(
-      'gpt-4o-mini',
+      model,
       messages,
       scenario.maxTokens,
       scenario.useStreaming,
@@ -846,9 +890,10 @@ async function benchmarkThroughput(
   const concurrency = scenario.concurrency;
   
   for (let i = 0; i < totalRequests; i += concurrency) {
+    const model = getModelForProtocol(scenario.protocol);
     const batch = Array(Math.min(concurrency, totalRequests - i)).fill(null).map(async () => {
       const result = await client.chatCompletion(
-        'gpt-4o-mini',
+        model,
         messages,
         scenario.maxTokens,
         scenario.useStreaming,
@@ -892,13 +937,14 @@ async function benchmarkStreaming(
     { role: 'user' as const, content: 'Write a short poem about AI in 4 lines.' },
   ];
   
+  const model = getModelForProtocol(protocol);
   const results: StreamingMetrics[] = [];
   let errors = 0;
   
   for (let i = 0; i < 10; i++) {
     try {
       const result = await client.chatCompletion(
-        'gpt-4o-mini',
+        model,
         messages,
         1000,
         true,
@@ -1365,6 +1411,13 @@ BENCHMARK TYPES:
     --skip-streaming        Skip streaming benchmarks
     --skip-features         Skip feature comparison
     --protocols MODE        Protocol tests: 'all' (default), 'openai', 'anthropic'
+    --quick                 Quick mode: test only OpenAI→OpenAI with fewer requests
+
+ENVIRONMENT VARIABLES:
+    BENCHMARK_ALL_PROTOCOLS   Test all 16 protocol combinations (default: true)
+                              Set to 'false' for OpenAI→OpenAI only
+    BENCHMARK_PROMPT_SIZE     Prompt size in characters (default: 100)
+    BENCHMARK_MAX_TOKENS      Max tokens in response (default: 500)
 
 MOCK SERVER:
     --latency-mean MS       Mean response latency in ms (default: 0)
@@ -1380,11 +1433,19 @@ OUTPUT:
 OTHER:
     --quick                 Run quick test (fewer requests)
     --keep-services         Don't stop docker compose services after benchmark
+    --skip-start            Don't start docker compose services (assume already running)
     --help, -h              Show this help
 
 EXAMPLES:
     # Default benchmark (all 3 targets, docker compose managed)
     bun run benchmark
+
+    # Full benchmark with ALL protocol combinations (16 transformations)
+    bun run benchmark        # BENCHMARK_ALL_PROTOCOLS defaults to true
+    BENCHMARK_ALL_PROTOCOLS=true bun run benchmark
+
+    # Test only OpenAI→OpenAI (fastest)
+    BENCHMARK_ALL_PROTOCOLS=false bun run benchmark
 
     # Test with 0% error rate
     bun run benchmark --error-rate 0
@@ -1398,11 +1459,17 @@ EXAMPLES:
     # Test with specific concurrency levels
     bun run benchmark --concurrency 1,5,10 --requests 10,50,100
 
-    # Quick validation test
+    # Quick validation test (OpenAI→OpenAI only, 2 scenarios)
     bun run benchmark --quick
 
     # Named run for easier identification
     bun run benchmark --run-id stress-test-100-concurrent
+
+PROTOCOL COMBINATIONS TESTED (when BENCHMARK_ALL_PROTOCOLS=true):
+    OpenAI Chat → OpenAI Chat, Anthropic, Responses, Completions
+    Anthropic   → OpenAI Chat, Anthropic, Responses, Completions
+    Responses   → OpenAI Chat, Anthropic, Responses, Completions
+    Completions → OpenAI Chat, Anthropic, Responses, Completions
 `);
 }
 
@@ -1493,6 +1560,7 @@ async function main() {
       'protocols': { type: 'string' },
       'no-error-log': { type: 'boolean' },
       'keep-services': { type: 'boolean' },
+      'skip-start': { type: 'boolean' },
       'help': { type: 'boolean', short: 'h' },
     },
     strict: false,
@@ -1587,6 +1655,7 @@ async function main() {
   
   // Track whether we should keep services running
   const keepServices = values['keep-services'] as boolean || false;
+  const skipStart = values['skip-start'] as boolean || false;
 
   const protocolsTested = [...new Set(config.scenarios.map(s => s.protocol?.description || 'OpenAI→OpenAI'))];
   
@@ -1610,7 +1679,11 @@ async function main() {
   console.log('');
 
   // Start services
-  await dockerManager.start();
+  if (!skipStart) {
+    await dockerManager.start();
+  } else {
+    console.log('  ⏩ Skipping service startup (--skip-start)');
+  }
   
   // Ensure services are stopped on exit (unless --keep-services)
   if (!keepServices) {
@@ -1698,9 +1771,15 @@ async function main() {
       
       // Get unique protocols from scenarios
       const protocolsToTest: (ProtocolCombination | undefined)[] = [undefined]; // default OpenAI passthrough
-      const hasAnthropic = config.scenarios.some(s => s.protocol?.sourceFormat === 'anthropic-messages');
-      if (hasAnthropic) {
-        protocolsToTest.push(PROTOCOL_COMBINATIONS[1]);
+      const seenProtocols = new Set<string>();
+      for (const scenario of config.scenarios) {
+        if (scenario.protocol) {
+          const key = `${scenario.protocol.sourceFormat}->${scenario.protocol.targetFormat}`;
+          if (!seenProtocols.has(key)) {
+            seenProtocols.add(key);
+            protocolsToTest.push(scenario.protocol);
+          }
+        }
       }
       
       for (const client of clients) {

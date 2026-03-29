@@ -1,5 +1,8 @@
 # API Map Configuration for Docker Benchmark Testing
-# This configuration routes requests to the mock LLM server
+# This configuration routes requests to the mock LLM server.
+# Values are injected from the central .env file (single source of truth).
+# Placeholders __MOCK_SERVER_URL__ and __MOCK_SERVER_API_BASE__ are replaced
+# by the container startup command in docker-compose.yml.
 
 server:
   port: 3000
@@ -16,11 +19,11 @@ schemes:
   - id: openai-chat
     format: openai
     path: /v1/chat/completions
-  
+
   - id: openai-models
     format: openai
     path: /v1/models
-  
+
   - id: openai-health
     format: openai
     path: /health
@@ -28,13 +31,13 @@ schemes:
 # Provider configuration - pointing to mock server
 providers:
   mock-openai:
-    baseUrl: "http://mock-server:9999/v1"
+    baseUrl: __MOCK_SERVER_API_BASE__
     apiKey: "mock-key"
     timeout: 180
     format: openai-chat
-  
+
   mock-anthropic:
-    baseUrl: "http://mock-server:9999/v1"
+    baseUrl: __MOCK_SERVER_API_BASE__
     apiKey: "mock-key"
     timeout: 180
     format: anthropic-messages
@@ -44,11 +47,11 @@ routes:
   - pattern: "gpt-4*"
     provider: mock-openai
     priority: 100
-  
+
   - pattern: "claude-3*"
     provider: mock-anthropic
     priority: 90
-  
+
   - pattern: "*"
     provider: mock-openai
     priority: 10

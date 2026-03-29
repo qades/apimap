@@ -14,10 +14,8 @@
 #   cd bench && bun run src/benchmark/index.ts
 #   docker-compose down
 #
-# Environment Variables:
-#   APIMAP_IMAGE - Override with specific image (default: build from source)
-
-version: '3.8'
+# Configuration:
+#   All URLs, ports and service names are defined in .env (single source of truth).
 
 services:
   # Mock LLM Server - Bun + Elysia implementation
@@ -27,9 +25,11 @@ services:
       dockerfile: Dockerfile.mockserver
     container_name: apibench-mock-server
     ports:
-      - "9999:9999"
+      - "${MOCK_SERVER_PORT:-9999}:${MOCK_SERVER_PORT:-9999}"
+    volumes:
+      - ./logs:/app/logs
     environment:
-      - MOCK_SERVER_PORT=9999
+      - MOCK_SERVER_PORT=${MOCK_SERVER_PORT:-9999}
       - MOCK_SERVER_HOST=0.0.0.0
       # Latency configuration (set to 0 for instant mode)
       # Input processing: fixed at 1000 tokens/sec (1ms/token)
@@ -45,8 +45,10 @@ services:
       - MOCK_MAX_CONTEXT=${MOCK_MAX_CONTEXT:-8192}
       # Enable/disable streaming
       - MOCK_STREAMING_ENABLED=${MOCK_STREAMING_ENABLED:-true}
+    command: >
+      sh -c "mkdir -p /app/logs && exec bun run src/mock-server/index.ts 2>/app/logs/mock-server-stderr.log"
     healthcheck:
-      test: ["CMD", "bun", "-e", "fetch('http://localhost:9999/health').then(r => process.exit(r.ok ? 0 : 1))"]
+      test: ["CMD", "sh", "-c", "bun -e \"fetch('http://localhost:${MOCK_SERVER_PORT:-9999}/health').then(r => process.exit(r.ok ? 0 : 1))\""]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -64,20 +66,20 @@ services:
     image: ghcr.io/berriai/litellm:main-stable
     container_name: apibench-litellm
     ports:
-      - "4000:4000"
+      - "${LITELLM_PORT:-4000}:${LITELLM_PORT:-4000}"
     volumes:
       - ./configs/litellm_config.yaml:/app/config.yaml:ro
     environment:
-      - LITELLM_MASTER_KEY=sk-test-key
+      - LITELLM_MASTER_KEY=${LITELLM_API_KEY:-sk-test-key}
       - OPENAI_API_KEY=mock-key
       - ANTHROPIC_API_KEY=mock-key
-      - MOCK_SERVER_URL=http://mock-server:9999
-    command: ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
+      - MOCK_SERVER_URL=${MOCK_SERVER_URL:-http://mock-server:9999}
+    command: ["--config", "/app/config.yaml", "--port", "${LITELLM_PORT:-4000}", "--host", "0.0.0.0"]
     depends_on:
       mock-server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"]
+      test: ["CMD", "sh", "-c", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${LITELLM_PORT:-4000}/health/liveliness')\""]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -103,7 +105,7 @@ services:
       - "${APIMAP_PORT:-3000}:3000"
       - "${APIMAP_GUI_PORT:-3001}:3001"
     volumes:
-      - ./configs/apimap_config.yaml:/app/config/config.yaml:ro
+      - ./configs/apimap_config.template.yaml:/app/config/config.yaml.template:ro
       - apimap-logs:/app/logs
     environment:
       - NODE_ENV=production
@@ -113,12 +115,17 @@ services:
       - EXTERNAL_GUI_PORT=${EXTERNAL_GUI_PORT:-3001}
       - OPENAI_API_KEY=mock-key
       - ANTHROPIC_API_KEY=mock-key
-    command: ["--config", "/app/config/config.yaml", "--port", "3000", "--no-gui"]
+      - MOCK_SERVER_URL=${MOCK_SERVER_URL:-http://mock-server:9999}
+      - MOCK_SERVER_API_BASE=${MOCK_SERVER_API_BASE:-http://mock-server:9999/v1}
+      - CONFIG_PATH=/tmp/config.yaml
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - sed -e "s|__MOCK_SERVER_URL__|$$MOCK_SERVER_URL|g" -e "s|__MOCK_SERVER_API_BASE__|$$MOCK_SERVER_API_BASE|g" /app/config/config.yaml.template > /tmp/config.yaml && exec /usr/local/bin/docker-entrypoint.sh
     depends_on:
       mock-server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/v1/models"]
+      test: ["CMD", "sh", "-c", "wget --quiet --tries=1 --spider http://localhost:3000/v1/models"]
       interval: 10s
       timeout: 5s
       retries: 15
@@ -141,11 +148,11 @@ services:
       - ./results:/app/results
       - ./reports:/app/reports
     environment:
-      - LITELLM_URL=http://litellm:4000
-      - APIMAP_URL=http://apimap:3000
-      - MOCK_SERVER_URL=http://mock-server:9999
-      - LITELLM_API_KEY=sk-test-key
-      - APIMAP_API_KEY=test-key
+      - LITELLM_URL=${LITELLM_URL:-http://litellm:4000}
+      - APIMAP_URL=${APIMAP_URL:-http://apimap:3000}
+      - MOCK_SERVER_URL=${MOCK_SERVER_URL:-http://mock-server:9999}
+      - LITELLM_API_KEY=${LITELLM_API_KEY:-sk-test-key}
+      - APIMAP_API_KEY=${APIMAP_API_KEY:-test-key}
       # Benchmark configuration
       - BENCHMARK_WARMUP=${BENCHMARK_WARMUP:-5}
       # Scenarios: "concurrency:requests,concurrency:requests,..."

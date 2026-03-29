@@ -9,6 +9,11 @@ import type { ProviderRequest } from "../types.ts";
  * Anthropic provider with native Messages API support
  */
 export class AnthropicProvider extends BaseProvider {
+  static override readonly supportedFormats = ["anthropic-messages"];
+  static override readonly endpoints = [
+    { method: "POST", path: "/v1/messages", format: "anthropic-messages", description: "Anthropic Messages API" },
+  ];
+
   /**
    * Override getHeaders to include anthropic-version
    */

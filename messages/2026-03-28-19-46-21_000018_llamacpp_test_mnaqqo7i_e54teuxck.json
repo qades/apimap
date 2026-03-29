@@ -1,0 +1,54 @@
+{
+  "timestamp": "2026-03-28T19:46:20.046Z",
+  "requestId": "mnaqqo7i_e54teuxck",
+  "method": "POST",
+  "path": "/v1/completions",
+  "sourceScheme": "openai-completions",
+  "targetScheme": "openai-chat",
+  "provider": "llamacpp",
+  "model": "test",
+  "targetModel": "MARTHA-0.8B-Q4_K_M",
+  "requestHeaders": {
+    "accept": "*/*",
+    "accept-encoding": "gzip, deflate",
+    "accept-language": "en-US,en;q=0.9,de;q=0.8",
+    "connection": "keep-alive",
+    "content-length": "131",
+    "content-type": "application/json",
+    "host": "mk-x2:3456",
+    "origin": "http://mk-x2:3001",
+    "referer": "http://mk-x2:3001/",
+    "sec-gpc": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+  },
+  "requestBody": {
+    "model": "test",
+    "max_tokens": 1024,
+    "temperature": 0.7,
+    "stream": true,
+    "prompt": "ping",
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    }
+  },
+  "transformedBody": {
+    "model": "MARTHA-0.8B-Q4_K_M",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ping"
+      }
+    ],
+    "max_tokens": 1024,
+    "temperature": 0.7,
+    "stream": true,
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    }
+  },
+  "responseStatus": 200,
+  "durationMs": 1137,
+  "routed": true,
+  "matchedPattern": "test",
+  "responseBody": "I can't directly ping your computer's network or IP address. However, I can help you with the following:\n\n1. **What is your computer's IP address?**\n   If you know your IP address (usually found in your network's settings), you can use it to test connectivity. The format is typically `IP_ADDRESS`.\n\n   **Example:**\n   ```\n   192.168.1.100\n   ```\n\n2. **How can I help you with network testing or troubleshooting?**\n   - **Check connectivity:** I can verify if your computer is connected to the internet.\n   - **Troubleshoot:** I can help diagnose common network issues like slow speeds, IP conflicts, or firewall problems.\n   - **Setup:** I can guide you through setting up a new network connection or configuring your current one.\n\n**To get started:**\n   - If you know your IP address, just paste it here.\n   - If you don't know it, your computer's IP address is usually found in **Network and Sharing Center** > **IP Configuration** or by typing `ipconfig` in the Command Prompt.\n\nWould you like to share the IP address for your computer?"
+}

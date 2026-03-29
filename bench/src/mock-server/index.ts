@@ -15,6 +15,18 @@
 import { Elysia, t } from 'elysia';
 import { mkdirSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import {
+  sleep,
+  countTokens,
+  countMessageTokens,
+  calculateLatency,
+  calculateChunkDelay,
+  applyThrottle,
+  gaussianRandom,
+  defaultConfig,
+  globalThrottler,
+  type ThrottleConfig,
+} from './throttle';
 
 // ============================================================================
 // Configuration
@@ -38,16 +50,24 @@ interface Config {
 const config: Config = {
   port: parseInt(Bun.env.MOCK_SERVER_PORT || '9999'),
   host: Bun.env.MOCK_SERVER_HOST || '0.0.0.0',
-  latencyMeanMs: parseFloat(Bun.env.MOCK_LATENCY_MEAN_MS || '0'),
-  latencyStdMs: parseFloat(Bun.env.MOCK_LATENCY_STD_MS || '0'),
-  tokensPerSecond: parseFloat(Bun.env.MOCK_TOKENS_PER_SEC || '100'),
+  latencyMeanMs: defaultConfig.latencyMeanMs,
+  latencyStdMs: defaultConfig.latencyStdMs,
+  tokensPerSecond: defaultConfig.tokensPerSecond,
   errorRate: parseFloat(Bun.env.MOCK_ERROR_RATE || '0.01'),
   maxContextLength: parseInt(Bun.env.MOCK_MAX_CONTEXT || '8192'),
-  streamingEnabled: Bun.env.MOCK_STREAMING_ENABLED !== 'false',
+  streamingEnabled: defaultConfig.streamingEnabled,
   logDir: Bun.env.MOCK_LOG_DIR || './logs',
   logRequests: Bun.env.MOCK_LOG_REQUESTS !== 'false',
   logErrors: Bun.env.MOCK_LOG_ERRORS !== 'false',
   strictValidation: Bun.env.MOCK_STRICT_VALIDATION !== 'false',
+};
+
+// Create throttling config that matches our environment
+const throttleConfig: ThrottleConfig = {
+  latencyMeanMs: config.latencyMeanMs,
+  latencyStdMs: config.latencyStdMs,
+  tokensPerSecond: config.tokensPerSecond,
+  streamingEnabled: config.streamingEnabled,
 };
 
 // ============================================================================
@@ -195,17 +215,6 @@ process.on('SIGTERM', () => {
 // Utils
 // ============================================================================
 
-function gaussianRandom(mean: number, std: number): number {
-  const u1 = Math.random();
-  const u2 = Math.random();
-  const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
-  return mean + z0 * std;
-}
-
-async function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 function generateId(): string {
   return `mock-${Math.floor(10000 + Math.random() * 90000)}`;
 }
@@ -214,42 +223,13 @@ function generateRequestId(): string {
   return `req-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 }
 
-function countTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+// Re-export throttling functions with config pre-applied
+function localCalculateLatency(inputTokens: number, outputTokens: number): number {
+  return calculateLatency(inputTokens, outputTokens, throttleConfig);
 }
 
-function countMessageTokens(messages: Array<{ role: string; content: unknown }>): number {
-  let total = 0;
-  for (const msg of messages) {
-    if (typeof msg.content === 'string') {
-      total += countTokens(msg.content);
-    } else if (Array.isArray(msg.content)) {
-      for (const block of msg.content) {
-        if (typeof block === 'object' && block !== null) {
-          if ('text' in block && typeof block.text === 'string') {
-            total += countTokens(block.text);
-          } else if ('content' in block && typeof block.content === 'string') {
-            total += countTokens(block.content);
-          }
-        }
-      }
-    }
-  }
-  return total;
-}
-
-function calculateLatency(inputTokens: number, outputTokens: number): number {
-  if (Bun.env.MOCK_INSTANT_MODE === 'true') {
-    return 0;
-  }
-  
-  const inputLatency = (inputTokens / 1000) * 1000;
-  const outputLatency = (outputTokens / config.tokensPerSecond) * 1000;
-  const baseLatency = config.latencyMeanMs > 0 
-    ? Math.max(0, gaussianRandom(config.latencyMeanMs, config.latencyStdMs))
-    : 0;
-  
-  return inputLatency + outputLatency + baseLatency;
+function localCalculateChunkDelay(): number {
+  return calculateChunkDelay(throttleConfig);
 }
 
 function shouldError(): boolean {
@@ -724,7 +704,7 @@ async function* openAIResponsesStreamGenerator(
       delta: prefix + word,
     })}${newline}${newline}`;
     
-    await sleep((1 / config.tokensPerSecond) * 1000);
+    await sleep(localCalculateChunkDelay());
   }
   
   // Content part done
@@ -787,6 +767,9 @@ async function handleOpenAIResponsesRequest(
 ): Promise<Response> {
   const requestId = generateRequestId();
   const provider = 'openai-responses';
+  
+  // Apply request throttling for concurrency limiting
+  await globalThrottler.acquire();
   
   try {
     if (config.strictValidation) {
@@ -856,7 +839,7 @@ async function handleOpenAIResponsesRequest(
     const includeReasoning = reasoning?.effort !== undefined;
     
     const inputTokens = countInputTokens(input);
-    const latency = calculateLatency(inputTokens, maxTokens);
+    const latency = localCalculateLatency(inputTokens, maxTokens);
     await sleep(latency);
     
     if (stream && config.streamingEnabled) {
@@ -924,6 +907,7 @@ async function handleOpenAIResponsesRequest(
     
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[Mock Server Error] POST /v1/responses: ${errorMessage}`, { body: JSON.stringify(body), stack: error instanceof Error ? error.stack : undefined });
     requestLogger.logError({
       timestamp: new Date().toISOString(),
       requestId,
@@ -932,8 +916,11 @@ async function handleOpenAIResponsesRequest(
       provider,
       error: errorMessage,
       stack: error instanceof Error ? error.stack : undefined,
+      context: { body: JSON.stringify(body) },
     });
     throw error;
+  } finally {
+    globalThrottler.release();
   }
 }
 
@@ -1185,7 +1172,7 @@ async function* openAIStreamGenerator(
     };
     
     yield `data: ${JSON.stringify(chunk)}\n\n`;
-    await sleep((1 / config.tokensPerSecond) * 1000);
+    await sleep(localCalculateChunkDelay());
   }
   
   yield `data: ${JSON.stringify({
@@ -1257,7 +1244,7 @@ async function* anthropicStreamGenerator(
       delta: { type: 'text_delta', text: prefix + word },
     })}\n\n`;
     
-    await sleep((1 / config.tokensPerSecond) * 1000);
+    await sleep(localCalculateChunkDelay());
   }
   
   yield `data: ${JSON.stringify({
@@ -1285,6 +1272,9 @@ async function handleOpenAIRequest(
 ): Promise<Response> {
   const requestId = generateRequestId();
   const provider = 'openai';
+  
+  // Apply request throttling for concurrency limiting
+  await globalThrottler.acquire();
   
   try {
     if (config.strictValidation) {
@@ -1354,7 +1344,7 @@ async function handleOpenAIRequest(
     const seed = body.seed !== undefined ? Number(body.seed) : undefined;
     
     const inputTokens = countMessageTokens(messages);
-    const latency = calculateLatency(inputTokens, maxTokens);
+    const latency = localCalculateLatency(inputTokens, maxTokens);
     await sleep(latency);
     
     if (stream && config.streamingEnabled) {
@@ -1424,6 +1414,7 @@ async function handleOpenAIRequest(
     
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[Mock Server Error] POST /v1/chat/completions: ${errorMessage}`, { body: JSON.stringify(body), stack: error instanceof Error ? error.stack : undefined });
     requestLogger.logError({
       timestamp: new Date().toISOString(),
       requestId,
@@ -1432,8 +1423,11 @@ async function handleOpenAIRequest(
       provider,
       error: errorMessage,
       stack: error instanceof Error ? error.stack : undefined,
+      context: { body: JSON.stringify(body) },
     });
     throw error;
+  } finally {
+    globalThrottler.release();
   }
 }
 
@@ -1445,6 +1439,10 @@ async function handleLegacyCompletionsRequest(
 ): Promise<Response> {
   const requestId = generateRequestId();
   const provider = 'openai-legacy';
+  console.error(`[DEBUG] /v1/completions received: ${JSON.stringify(body)}`);
+  
+  // Apply request throttling for concurrency limiting
+  await globalThrottler.acquire();
   
   try {
     if (shouldError()) {
@@ -1550,6 +1548,7 @@ async function handleLegacyCompletionsRequest(
     
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[Mock Server Error] POST /v1/completions: ${errorMessage}`, { body: JSON.stringify(body), stack: error instanceof Error ? error.stack : undefined });
     requestLogger.logError({
       timestamp: new Date().toISOString(),
       requestId,
@@ -1558,8 +1557,11 @@ async function handleLegacyCompletionsRequest(
       provider,
       error: errorMessage,
       stack: error instanceof Error ? error.stack : undefined,
+      context: { body: JSON.stringify(body) },
     });
     throw error;
+  } finally {
+    globalThrottler.release();
   }
 }
 
@@ -1635,7 +1637,7 @@ async function* legacyCompletionsStreamGenerator(
       ],
     };
     yield `data: ${JSON.stringify(chunk)}\n\n`;
-    await sleep(config.streaming.chunkDelay);
+    await sleep(localCalculateChunkDelay());
   }
   
   yield `data: ${JSON.stringify({ id, object: 'text_completion', created, model, choices: [{ index: 0, text: '', finish_reason: 'stop' }] })}\n\n`;
@@ -1649,6 +1651,9 @@ async function handleAnthropicRequest(
 ): Promise<Response> {
   const requestId = generateRequestId();
   const provider = 'anthropic';
+  
+  // Apply request throttling for concurrency limiting
+  await globalThrottler.acquire();
   
   try {
     if (config.strictValidation) {
@@ -1679,7 +1684,7 @@ async function handleAnthropicRequest(
     const enableThinking = thinking?.type === 'enabled';
     
     const inputTokens = countMessageTokens(messages);
-    const latency = calculateLatency(inputTokens, maxTokens);
+    const latency = localCalculateLatency(inputTokens, maxTokens);
     await sleep(latency);
     
     if (stream && config.streamingEnabled) {
@@ -1724,6 +1729,7 @@ async function handleAnthropicRequest(
     
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[Mock Server Error] POST /v1/messages: ${errorMessage}`, { body: JSON.stringify(body), stack: error instanceof Error ? error.stack : undefined });
     requestLogger.logError({
       timestamp: new Date().toISOString(),
       requestId,
@@ -1731,8 +1737,12 @@ async function handleAnthropicRequest(
       path: '/v1/messages',
       provider,
       error: errorMessage,
+      stack: error instanceof Error ? error.stack : undefined,
+      context: { body: JSON.stringify(body) },
     });
     throw error;
+  } finally {
+    globalThrottler.release();
   }
 }
 
@@ -1743,6 +1753,9 @@ async function handleDeepSeekRequest(
 ): Promise<Response> {
   const requestId = generateRequestId();
   const provider = 'deepseek';
+  
+  // Apply request throttling for concurrency limiting
+  await globalThrottler.acquire();
   
   try {
     if (config.strictValidation) {
@@ -1769,7 +1782,7 @@ async function handleDeepSeekRequest(
     const enableThinking = chatTemplateKwargs?.enable_thinking === true || 
                           (body.thinking as Record<string, unknown>)?.type === 'enabled';
     
-    await sleep(calculateLatency(countMessageTokens(messages), maxTokens));
+    await sleep(localCalculateLatency(countMessageTokens(messages), maxTokens));
     
     if (stream && config.streamingEnabled) {
       const generator = openAIStreamGenerator(
@@ -1817,6 +1830,8 @@ async function handleDeepSeekRequest(
       error: error instanceof Error ? error.message : String(error),
     });
     throw error;
+  } finally {
+    globalThrottler.release();
   }
 }
 
@@ -1829,6 +1844,8 @@ const app = new Elysia()
     const requestId = generateRequestId();
     const errorMessage = error instanceof Error ? error.message : String(error);
     
+    console.error(`[Error ${code}] ${request.method} ${new URL(request.url).pathname}: ${errorMessage}`, error instanceof Error ? error.stack : '');
+    
     requestLogger.logError({
       timestamp: new Date().toISOString(),
       requestId,
@@ -1839,7 +1856,6 @@ const app = new Elysia()
       stack: error instanceof Error ? error.stack : undefined,
     });
     
-    console.error(`[Error ${code}]`, error);
     set.status = 500;
     return { 
       error: 'Internal server error',
@@ -1880,6 +1896,14 @@ const app = new Elysia()
       generic: '/generic/v1/chat/completions',
     },
     stats: requestLogger.getStats(),
+    throttling: {
+      latencyMeanMs: config.latencyMeanMs,
+      latencyStdMs: config.latencyStdMs,
+      tokensPerSecond: config.tokensPerSecond,
+      streamingEnabled: config.streamingEnabled,
+      maxConcurrent: globalThrottler.getStats().max,
+      currentLoad: globalThrottler.getStats(),
+    },
   }))
 
   // List models (OpenAI format)
@@ -2036,7 +2060,42 @@ const app = new Elysia()
     configuration: {
       strictValidation: config.strictValidation,
     },
-  }));
+  }))
+
+  // Fallback: log any unmatched requests for debugging
+  .all('/*', async ({ request, body }) => {
+    const requestId = generateRequestId();
+    const url = new URL(request.url);
+    let bodyText: string | undefined;
+    try {
+      bodyText = body ? JSON.stringify(body) : undefined;
+    } catch {
+      bodyText = '[unserializable body]';
+    }
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      requestId,
+      method: request.method,
+      path: url.pathname,
+      query: url.search,
+      headers: Object.fromEntries(request.headers.entries()),
+      body: bodyText,
+    };
+    console.error(`[Mock Server Fallback] Unmatched route: ${request.method} ${url.pathname}`, logEntry);
+    requestLogger.logError({
+      timestamp: logEntry.timestamp,
+      requestId,
+      method: request.method,
+      path: url.pathname,
+      provider: 'unknown',
+      error: `Unmatched route: ${request.method} ${url.pathname}`,
+      context: logEntry,
+    });
+    return new Response(JSON.stringify({ error: 'Not found', requestId, path: url.pathname }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json', 'X-Request-Id': requestId },
+    });
+  });
 
 // ============================================================================
 // Start Server

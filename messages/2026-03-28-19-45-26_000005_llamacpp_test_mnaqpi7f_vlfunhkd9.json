@@ -1,0 +1,59 @@
+{
+  "timestamp": "2026-03-28T19:45:25.612Z",
+  "requestId": "mnaqpi7f_vlfunhkd9",
+  "method": "POST",
+  "path": "/v1/chat/completions",
+  "sourceScheme": "openai-chat",
+  "targetScheme": "openai-chat",
+  "provider": "llamacpp",
+  "model": "test",
+  "targetModel": "MARTHA-0.8B-Q4_K_M",
+  "requestHeaders": {
+    "accept": "*/*",
+    "accept-encoding": "gzip, deflate",
+    "accept-language": "en-US,en;q=0.9,de;q=0.8",
+    "connection": "keep-alive",
+    "content-length": "161",
+    "content-type": "application/json",
+    "host": "mk-x2:3456",
+    "origin": "http://mk-x2:3001",
+    "referer": "http://mk-x2:3001/",
+    "sec-gpc": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+  },
+  "requestBody": {
+    "model": "test",
+    "max_tokens": 1024,
+    "temperature": 0.7,
+    "stream": true,
+    "messages": [
+      {
+        "role": "user",
+        "content": "ping"
+      }
+    ],
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    }
+  },
+  "transformedBody": {
+    "model": "MARTHA-0.8B-Q4_K_M",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ping"
+      }
+    ],
+    "max_tokens": 1024,
+    "temperature": 0.7,
+    "stream": true,
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    }
+  },
+  "responseStatus": 200,
+  "durationMs": 1082,
+  "routed": true,
+  "matchedPattern": "test",
+  "responseBody": "It looks like you want to **ping** (ping an IP address or hostname) or perhaps you want to **ping the internet**.\n\nSince I can't see your specific internet connection or IP address, I can't perform a ping test right now. However, here is how you can do it on your computer:\n\n**1. If you are using a PC:**\nOpen your Command Prompt (Windows) or Terminal (Mac), type the command, and press Enter:\n```bash\nping <your-ip-or-hostname>\n```\n\n**2. If you are on a mobile device:**\nOpen your Phone Settings app, go to **Wi-Fi** or **Mobile data** settings, and tap on **Network** (or Connection). Find your **IP address** (usually starts with `192.168.x.x`), and type it there:\n```\nip\n```\nThen press Enter.\n\nIf you were just typing \"ping\" because you are typing in **chat**, please tell me **which device** you are using (Windows, Mac, or Android/iOS) so I can guide you exactly on how to use the tool."
+}

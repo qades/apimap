@@ -1,29 +1,30 @@
 # LiteLLM Configuration for Docker Benchmark Testing
-# This configuration routes requests to the mock LLM server
+# This configuration routes requests to the mock LLM server.
+# Values are injected from the central .env file (single source of truth).
 
 model_list:
   - model_name: gpt-4o-mini
     litellm_params:
       model: openai/gpt-4o-mini
-      api_base: http://mock-server:9999/v1
+      api_base: ${MOCK_SERVER_API_BASE}
       api_key: mock-key
-  
+
   - model_name: gpt-4o
     litellm_params:
       model: openai/gpt-4o
-      api_base: http://mock-server:9999/v1
+      api_base: ${MOCK_SERVER_API_BASE}
       api_key: mock-key
-  
+
   - model_name: claude-3-haiku
     litellm_params:
       model: anthropic/claude-3-haiku-20240307
-      api_base: http://mock-server:9999/v1
+      api_base: ${MOCK_SERVER_API_BASE}
       api_key: mock-key
-      
+
   - model_name: claude-3-opus
     litellm_params:
       model: anthropic/claude-3-opus-20240229
-      api_base: http://mock-server:9999/v1
+      api_base: ${MOCK_SERVER_API_BASE}
       api_key: mock-key
 
 # General settings
@@ -38,17 +39,17 @@ router_settings:
 
 # Server settings
 server:
-  port: 4000
+  port: ${LITELLM_PORT}
   host: 0.0.0.0
 
 # No authentication for benchmark testing
 general_settings:
-  master_key: sk-test-key
-  
+  master_key: ${LITELLM_API_KEY}
+
 # Logging - minimal for benchmarks
 logging:
   call_args: False
-  
+
 # Health check
 health_check:
   enabled: True

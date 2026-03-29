@@ -19,11 +19,13 @@
     "test:watch": "bun test --watch",
     "bench:setup": "cd bench && echo 'Building mock-server...' && docker-compose build mock-server && echo 'Building apimap (this may take a while)...' && docker-compose build apimap",
     "bench": "cd bench && bun run src/benchmark/index.ts --quick",
-    "bench:full": "cd bench && bun run src/benchmark/index.ts",
+    "bench:full": "cd bench && BENCHMARK_ALL_PROTOCOLS=true bun run src/benchmark/index.ts",
+    "bench:endpoints": "cd bench && BENCHMARK_ALL_PROTOCOLS=true bun run src/benchmark/index.ts --protocols all",
     "bench:clean": "cd bench && docker-compose down -v",
     "mock-server": "cd bench && bun run src/mock-server/index.ts",
     "docker:build": "docker build -t apimap:local .",
-    "docker:run": "docker run -p 3000:3000 -p 3001:3001 --rm apimap:local"
+    "docker:run": "docker run -p 3000:3000 -p 3001:3001 --rm apimap:local",
+    "endpoints": "bun run scripts/list-endpoints.ts"
   },
   "keywords": [
     "openai",

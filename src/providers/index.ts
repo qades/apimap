@@ -5,6 +5,10 @@
 // Base class and types
 export { BaseProvider } from "./base.ts";
 export type { 
+  ProviderMetadata,
+  ProviderEndpoint,
+} from "./base.ts";
+export type { 
   ProviderRequest, 
   ProviderResponse, 
   ProviderInfo, 

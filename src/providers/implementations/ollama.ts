@@ -10,6 +10,13 @@ import type { ProviderRequest } from "../types.ts";
  * No authentication required
  */
 export class OllamaProvider extends BaseProvider {
+  static override readonly supportedFormats = ["ollama-chat", "openai-chat"];
+  static override readonly endpoints = [
+    { method: "POST", path: "/api/chat", format: "ollama-chat", description: "Ollama chat" },
+    { method: "POST", path: "/api/generate", format: "ollama-generate", description: "Ollama generate" },
+    { method: "POST", path: "/v1/chat/completions", format: "openai-chat", description: "Ollama OpenAI-compatible" },
+  ];
+
   /**
    * Ollama uses /api endpoints
    */

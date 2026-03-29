@@ -137,6 +137,13 @@ interface OpenAIResponse {
  * Used by most cloud providers that follow OpenAI's API format
  */
 export class OpenAICompatibleProvider extends BaseProvider {
+  static override readonly supportedFormats = ["openai-chat", "openai-completions", "openai-responses", "openai-compatible"];
+  static override readonly endpoints = [
+    { method: "POST", path: "/v1/chat/completions", format: "openai-chat", description: "OpenAI chat completions" },
+    { method: "POST", path: "/v1/completions", format: "openai-completions", description: "OpenAI text completions" },
+    { method: "POST", path: "/v1/responses", format: "openai-responses", description: "OpenAI responses API" },
+  ];
+
   buildRequest(body: unknown, _originalHeaders: Headers, format?: string): ProviderRequest {
     return {
       url: this.getEndpointUrl(format || "openai-chat"),

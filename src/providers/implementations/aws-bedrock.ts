@@ -9,6 +9,12 @@ import type { ProviderRequest, AWSCredentials } from "../types.ts";
  * AWS Bedrock provider with SigV4 authentication
  */
 export class AWSBedrockProvider extends BaseProvider {
+  static override readonly supportedFormats = ["bedrock-converse"];
+  static override readonly endpoints = [
+    { method: "POST", path: "/model/{modelId}/converse", format: "bedrock-converse", description: "AWS Bedrock converse" },
+    { method: "POST", path: "/model/{modelId}/converse-stream", format: "bedrock-converse", description: "AWS Bedrock streaming" },
+  ];
+
   /**
    * Get AWS credentials from environment
    */

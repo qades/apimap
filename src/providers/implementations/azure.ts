@@ -10,6 +10,12 @@ import type { ProviderRequest } from "../types.ts";
  * Uses api-key header instead of Authorization
  */
 export class AzureProvider extends BaseProvider {
+  static override readonly supportedFormats = ["azure-chat", "openai-chat", "openai-responses"];
+  static override readonly endpoints = [
+    { method: "POST", path: "/openai/deployments/{deployment}/chat/completions", format: "azure-chat", description: "Azure OpenAI chat" },
+    { method: "POST", path: "/responses", format: "openai-responses", description: "Azure OpenAI responses" },
+  ];
+
   /**
    * Azure uses api-key header instead of Authorization
    */

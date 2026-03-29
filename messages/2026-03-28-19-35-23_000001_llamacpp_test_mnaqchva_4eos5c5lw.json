@@ -1,0 +1,59 @@
+{
+  "timestamp": "2026-03-28T19:35:18.646Z",
+  "requestId": "mnaqchva_4eos5c5lw",
+  "method": "POST",
+  "path": "/v1/responses",
+  "sourceScheme": "openai-responses",
+  "targetScheme": "openai-chat",
+  "provider": "llamacpp",
+  "model": "test",
+  "targetModel": "MARTHA-0.8B-Q4_K_M",
+  "requestHeaders": {
+    "accept": "*/*",
+    "accept-encoding": "gzip, deflate",
+    "accept-language": "en-US,en;q=0.9,de;q=0.8",
+    "connection": "keep-alive",
+    "content-length": "157",
+    "content-type": "application/json",
+    "host": "mk-x2:3456",
+    "origin": "http://mk-x2:3001",
+    "referer": "http://mk-x2:3001/",
+    "sec-gpc": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+  },
+  "requestBody": {
+    "model": "test",
+    "max_tokens": 1024,
+    "temperature": 0.7,
+    "stream": true,
+    "input": [
+      {
+        "role": "user",
+        "content": "ping"
+      }
+    ],
+    "chat_template_kwargs": {
+      "enable_thinking": true
+    }
+  },
+  "transformedBody": {
+    "model": "MARTHA-0.8B-Q4_K_M",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ping"
+      }
+    ],
+    "max_tokens": 1024,
+    "temperature": 0.7,
+    "stream": true,
+    "chat_template_kwargs": {
+      "enable_thinking": true
+    }
+  },
+  "responseStatus": 200,
+  "durationMs": 4522,
+  "routed": true,
+  "matchedPattern": "test",
+  "responseBody": "\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: \"ping\"\n    *   Context: The user is asking to ping, but without any specific domain, IP, or connection details.\n    *   Intent: The user likely wants to know if a specific IP address is available, or wants to ping a service (like `ping` with a specific command). Since they didn't specify a target, I need to clarify or ask for the target.\n\n2.  **Determine the Best Response:**\n    *   Since \"ping\" is a command to connect to an IP address, I should ask for the specific IP address or service the user wants to ping.\n    *   I should also ask if they want to ping a specific service (like `ping` with a specific target).\n    *   I should clarify that I can't ping anything without a target.\n    *   I should also consider if they meant to ask about `ping` as a tool (like a command to use in a chat).\n    *   I should provide a helpful guide on how to use the `ping` command in general (e.g., how to check connectivity).\n    *   I should ask for the specific target if they want to check if a specific IP is available.\n\n3.  **Draft the Response:**\n    *   Acknowledge the command: \"I can help you ping a specific IP address.\"\n    *   Ask for the target: \"Could you please specify which IP address you want to ping?\"\n    *   Explain the difference between `ping` and `ping` (e.g., `ping` vs `ping` with specific options).\n    *   Offer to use `ping` in a specific way (e.g., checking DNS, checking a specific port).\n    *   Ask if they want to ping a specific service (like `ping` with a specific target).\n\n4.  **Refine the Response:**\n    *   The user's input is just \"ping\".\n    *   This could be interpreted as:\n        *   A command to ping (e.g., `ping -I 192.168.1.100`).\n        *   A request to ping a specific service (e.g., `ping -I 192.168.1.1`).\n        *   A typo (e.g., `ping` vs `ping`).\n    *   I will assume the user wants to check if a specific IP is available to ping.\n    *   I will ask for the specific IP address.\n\n5.  **Final Polish:**\n    *   Keep it simple and helpful.\n    *   Ask for the target.\n    *   Mention `ping` vs `ping` in case of confusion.\n    *   If they meant \"ping\" (as a command to use), explain how to use it.\n    *   If they meant \"ping\" (as a command to use), explain how to use it.\n\n    Wait, I need to be careful. \"ping\" is the command. If the user wants to check if a specific IP is online, they likely want to use the `ping` command. If they want to ping a specific service, they need to use `ping -I`. If they want to check a specific port, they need to use `ping -I` and `port`.\n\n    Let's assume the user wants to check if a specific IP is available to ping. I should ask for the specific IP.\n\n    Alternatively, maybe the user is asking about the `ping` command in general. I should explain what `ping` does.\n    However, the most common interpretation is checking if a specific IP is available.\n\n    So, I will ask for the specific IP address.\n\n    Also, I should consider if the user wants to use `ping` with specific options (like `-I` for internal).\n\n    Let's draft the response.\n\n    *   \"I can help you check if a specific IP address is available to ping.\"\n    *   \"Please specify the IP address.\"\n    *   \"If you want to use the `ping` command, here are some examples.\"\n    *   \"If you want to ping a specific service, use `ping -I`.\"\n\n    Wait, I should also consider if the user wants to ping a specific service like `ping` (the command). Or if they want to ping a specific IP like `192.168.1.1`.\n\n    The most reasonable interpretation is that the user wants to check if a specific IP is available to ping. I will ask for the specific IP.\n\n    Wait, there is a possibility the user just wants to know how to use `ping` as a command in a chat.\n    I will ask for the"
+}

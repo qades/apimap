@@ -1,0 +1,59 @@
+{
+  "timestamp": "2026-03-28T19:44:46.044Z",
+  "requestId": "mnaqonoa_1hk3ez7e0",
+  "method": "POST",
+  "path": "/v1/chat/completions",
+  "sourceScheme": "openai-chat",
+  "targetScheme": "openai-chat",
+  "provider": "llamacpp",
+  "model": "test",
+  "targetModel": "MARTHA-0.8B-Q4_K_M",
+  "requestHeaders": {
+    "accept": "*/*",
+    "accept-encoding": "gzip, deflate",
+    "accept-language": "en-US,en;q=0.9,de;q=0.8",
+    "connection": "keep-alive",
+    "content-length": "160",
+    "content-type": "application/json",
+    "host": "mk-x2:3456",
+    "origin": "http://mk-x2:3001",
+    "referer": "http://mk-x2:3001/",
+    "sec-gpc": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+  },
+  "requestBody": {
+    "model": "test",
+    "max_tokens": 1024,
+    "temperature": 0.7,
+    "stream": true,
+    "messages": [
+      {
+        "role": "user",
+        "content": "ping"
+      }
+    ],
+    "chat_template_kwargs": {
+      "enable_thinking": true
+    }
+  },
+  "transformedBody": {
+    "model": "MARTHA-0.8B-Q4_K_M",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ping"
+      }
+    ],
+    "max_tokens": 1024,
+    "temperature": 0.7,
+    "stream": true,
+    "chat_template_kwargs": {
+      "enable_thinking": true
+    }
+  },
+  "responseStatus": 200,
+  "durationMs": 4508,
+  "routed": true,
+  "matchedPattern": "test",
+  "responseBody": "\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: \"ping\"\n    *   Context: This is a very short, simple command. It could be a command to ping a computer or a device, or a simple greeting.\n    *   Intent: The user likely wants to know what \"ping\" means, or they are asking about a specific service (e.g., ping a website, a firewall, or a specific ping command).\n    *   Ambiguity: \"Ping\" is a technical network command. It's often used to test connectivity.\n\n2.  **Determine the Best Response:**\n    *   Since the input is short and lacks context, I need to cover the most common interpretations.\n    *   *Interpretation 1: Network Connectivity* - This is the most common usage of the word \"ping\" in a technical context.\n    *   *Interpretation 2: Greeting/Chat* - The user might have typed this to greet me or just be polite.\n    *   *Interpretation 3: Specific Service/Command* - Maybe they want to know what this command does.\n\n    *Decision:* The safest and most helpful response is to explain what a ping is (the network test), how it works, and provide an example command or usage.\n\n    *Wait, looking at the prompt again:* \"ping\". It's just the word.\n    *Option:* I should ask what they want, or explain the technical meaning if they want to test connectivity.\n    *Actually:* If I just explain what \"ping\" is, it might be too long. If I just say \"I can ping a website,\" it might be too specific.\n    *Best approach:* Explain the technical concept (ping = ping test) and offer to help with it.\n\n    *Wait, actually:* Let's look at the instruction. The user just said \"ping\".\n    *Scenario A:* They want to know what \"ping\" is.\n    *Scenario B:* They want to test connectivity.\n    *Scenario C:* They just typed \"ping\" and want to know how to type it or what it stands for.\n\n    *Let's assume a general technical question:*\n    \"What is ping?\" -> \"Ping is a command to test network connectivity.\"\n\n    *Let's assume a conversational context:*\n    \"Hello. You typed ping. Is that okay to type it again?\"\n\n    *Actually:* The prompt is very short. I should just answer the question. What does \"ping\" mean in a general sense? It's a command used in networking to check connectivity.\n\n    *Wait, is this a specific command?*\n    Yes. \"Ping\" is a command used in the ping command in the ping protocol.\n\n    *Let's construct the response:*\n    1.  Explain what ping is (test network connectivity).\n    2.  Give a command example (e.g., `ping 127.0.0.1` or `ping google.com`).\n    3.  Mention it's used in the ping protocol (ping test).\n\n    *Wait, I should check if \"ping\" is a typo for something else.*\n    If the user meant \"ping\", they might mean \"ping\" in a programming context.\n    If they mean \"ping\", they might mean \"ping\" as in \"ping a website\".\n\n    *Actually, the most helpful response is to explain what \"ping\" stands for.*\n    It's a command to test network connectivity.\n    So, \"Ping is a command used to test network connectivity.\"\n\n    *Wait, I should not assume the user wants a specific service.*\n    I should just explain the concept.\n\n    *Drafting the response:*\n    \"Ping is a command used in networking to test connectivity.\"\n    \"You can use this command to check if a website or device is online.\"\n    \"Example: `ping google.com`\"\n\n    *Wait, I need to be careful.*\n    If the user just typed \"ping\", they might be asking me to do something.\n    \"How do I ping?\"\n    \"You can use the ping command to test connectivity.\"\n\n    *Let's go with explaining the concept.*\n    \"Ping is a command used in networking to test connectivity. You can use it to check if a website or device is online.\"\n\n    *Wait, I should check if there are specific variations.*\n    Sometimes \"ping\" is used as a command to ping a server.\n    Sometimes \"ping\" is used as a command to ping a specific IP address.\n\n    *Let's provide a clear, concise explanation.*\n    \"Ping is a command used in networking to test connectivity.\"\n    \"It's often used to check if a website or device is"
+}

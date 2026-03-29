@@ -1,0 +1,59 @@
+{
+  "timestamp": "2026-03-28T19:45:31.946Z",
+  "requestId": "mnaqpn3d_d6be0dp4o",
+  "method": "POST",
+  "path": "/v1/responses",
+  "sourceScheme": "openai-responses",
+  "targetScheme": "openai-chat",
+  "provider": "llamacpp",
+  "model": "test",
+  "targetModel": "MARTHA-0.8B-Q4_K_M",
+  "requestHeaders": {
+    "accept": "*/*",
+    "accept-encoding": "gzip, deflate",
+    "accept-language": "en-US,en;q=0.9,de;q=0.8",
+    "connection": "keep-alive",
+    "content-length": "158",
+    "content-type": "application/json",
+    "host": "mk-x2:3456",
+    "origin": "http://mk-x2:3001",
+    "referer": "http://mk-x2:3001/",
+    "sec-gpc": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+  },
+  "requestBody": {
+    "model": "test",
+    "max_tokens": 1024,
+    "temperature": 0.7,
+    "stream": true,
+    "input": [
+      {
+        "role": "user",
+        "content": "ping"
+      }
+    ],
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    }
+  },
+  "transformedBody": {
+    "model": "MARTHA-0.8B-Q4_K_M",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ping"
+      }
+    ],
+    "max_tokens": 1024,
+    "temperature": 0.7,
+    "stream": true,
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    }
+  },
+  "responseStatus": 200,
+  "durationMs": 649,
+  "routed": true,
+  "matchedPattern": "test",
+  "responseBody": "I cannot process or send a \"ping\" request directly, as I am an AI text model and don't have the ability to interact with network equipment, routers, or specific software.\n\nI can, however, help you with:\n*   **Analyzing** a ping result if you provide the output.\n*   **Explaining** what a ping result means in different contexts (e.g., why a \"No\" might happen on a server, or how to diagnose a slow connection).\n*   **Checking** the status of specific services or domains you mentioned.\n\nIf you have a specific issue or need help interpreting a ping output, please let me know what you're seeing!"
+}

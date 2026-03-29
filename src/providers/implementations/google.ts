@@ -10,6 +10,12 @@ import type { ProviderRequest } from "../types.ts";
  * Uses URL query parameter for authentication
  */
 export class GoogleProvider extends BaseProvider {
+  static override readonly supportedFormats = ["google-generate"];
+  static override readonly endpoints = [
+    { method: "POST", path: "/v1beta/models/{model}:generateContent", format: "google-generate", description: "Gemini generate content" },
+    { method: "POST", path: "/v1beta/models/{model}:streamGenerateContent", format: "google-generate", description: "Gemini streaming generate" },
+  ];
+
   /**
    * Google uses models/{model} path format
    */
