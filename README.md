@@ -339,17 +339,22 @@ API Map is designed for high-performance routing with minimal overhead:
 
 ### Running Benchmarks
 
-Benchmark your changes locally:
+Benchmark your changes locally (runs entirely in Docker):
 
 ```bash
-# Quick benchmark (2-3 minutes)
+# Default benchmark (~5-10 minutes) - OpenAI→OpenAI protocol
 bun run bench
 
-# Full benchmark suite (10-15 minutes)
+# Full benchmark (~15-25 minutes) - ALL 16 protocol combinations
 bun run bench:full
+
+# Quick validation (~2-3 minutes) - minimal scenarios
+bun run bench:quick
 ```
 
-Results are saved to `bench/results/` with detailed metrics comparing API Map against other gateways.
+Results are saved to `bench/results/` and `bench/reports/` with detailed metrics comparing API Map against LiteLLM and Direct (baseline).
+
+See [BENCHMARK.md](BENCHMARK.md) for detailed documentation.
 
 See [BENCHMARK.md](BENCHMARK.md) for detailed documentation.
 
