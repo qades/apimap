@@ -185,12 +185,21 @@
         </div>
       </div>
 
-      <div class="flex items-center gap-4 flex-shrink-0">
+      <div class="flex flex-col items-end gap-1 flex-shrink-0">
         <!-- Duration -->
         <span class="text-sm font-medium text-gray-600">
           {formatDuration(log.durationMs)}
         </span>
+        
+        <!-- Tokens/Second -->
+        {#if tps}
+          <span class="text-xs text-gray-500">
+            {tps} t/s
+          </span>
+        {/if}
+      </div>
 
+      <div class="flex items-center gap-3 flex-shrink-0">
         <!-- HTTP Status Pill -->
         <span 
           class="px-2 py-1 rounded text-sm font-mono"

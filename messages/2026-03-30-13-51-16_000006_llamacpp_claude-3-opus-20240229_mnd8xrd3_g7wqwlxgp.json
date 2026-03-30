@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-03-30T13:24:58.779Z",
-  "requestId": "mnd7zy8r_v708rin4j",
+  "timestamp": "2026-03-30T13:51:16.167Z",
+  "requestId": "mnd8xrd3_g7wqwlxgp",
   "method": "POST",
   "path": "/v1/chat/completions",
   "sourceScheme": "openai-chat",
@@ -13,7 +13,7 @@
     "accept-encoding": "gzip, deflate",
     "accept-language": "en-US,en;q=0.9,de;q=0.8",
     "connection": "keep-alive",
-    "content-length": "178",
+    "content-length": "211",
     "content-type": "application/json",
     "host": "mk-x2:3456",
     "origin": "http://mk-x2:3001",
@@ -29,7 +29,7 @@
     "messages": [
       {
         "role": "user",
-        "content": "test"
+        "content": "Explain what you are in one sentence."
       }
     ],
     "chat_template_kwargs": {
@@ -41,7 +41,7 @@
     "messages": [
       {
         "role": "user",
-        "content": "test"
+        "content": "Explain what you are in one sentence."
       }
     ],
     "max_tokens": 1024,
@@ -52,15 +52,15 @@
     }
   },
   "responseStatus": 200,
-  "durationMs": 33,
+  "durationMs": 471,
   "routed": true,
   "matchedPattern": "claude-3*",
-  "providerUrl": "http://host.containers.internal:58080/v1/chat/completions",
+  "providerUrl": "http://localhost:58080/v1/chat/completions",
   "authScheme": {
     "header": "Authorization",
     "prefix": "Bearer ",
     "maskedKey": "***"
   },
   "stream": true,
-  "error": "Unable to connect. Is the computer able to access the url?"
+  "responseBody": "I am an AI-powered language model designed to understand and generate human-like text based on the input I receive, assisting with a wide range of tasks such as answering questions, providing information, and engaging in conversation."
 }
