@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, ChevronUp, ExternalLink } from '@lucide/svelte';
+  import { ChevronDown, ChevronUp, CheckCircle, AlertCircle, ArrowRight } from '@lucide/svelte';
   import type { LogEntry } from '$lib/utils/api';
   import StatusIcon from './StatusIcon.svelte';
   import JsonViewer from './JsonViewer.svelte';
@@ -19,12 +19,11 @@
   function deriveStatus(log: LogEntry): 'completed' | 'error' | 'pending' | 'streaming' | 'unrouted' {
     if (!log.routed) return 'unrouted';
     if (log.error || log.responseStatus >= 400) return 'error';
-    // Note: streaming/pending status comes from active requests tracking
-    // For now, completed logs show as completed
     return 'completed';
   }
 
   const status = $derived(deriveStatus(log));
+  const isSuccess = $derived(log.responseStatus < 400 && !log.error && log.routed);
 
   // Format time
   function formatTime(timestamp: string): string {
@@ -35,6 +34,31 @@
   function formatDuration(ms: number): string {
     if (ms < 1000) return `${ms}ms`;
     return `${(ms / 1000).toFixed(1)}s`;
+  }
+
+  // Calculate t/s from response
+  function calculateTokensPerSecond(log: LogEntry): number | null {
+    // Use pre-calculated if available
+    if (log.tokensPerSecond) return log.tokensPerSecond;
+    
+    // Calculate from response usage
+    const body = log.responseBody;
+    if (!body || typeof body !== 'object') return null;
+    const b = body as Record<string, unknown>;
+    
+    // OpenAI format
+    const usage = b.usage as { completion_tokens?: number } | undefined;
+    if (usage?.completion_tokens && log.durationMs > 0) {
+      return Math.round((usage.completion_tokens / log.durationMs) * 1000);
+    }
+    
+    // Anthropic format
+    const anthropicUsage = b.usage as { output_tokens?: number } | undefined;
+    if (anthropicUsage?.output_tokens && log.durationMs > 0) {
+      return Math.round((anthropicUsage.output_tokens / log.durationMs) * 1000);
+    }
+    
+    return null;
   }
 
   // Extract prompt from request body
@@ -113,6 +137,7 @@
   const prompt = $derived(extractPrompt(log.requestBody));
   const responseContent = $derived(extractResponseContent(log.responseBody));
   const reasoningContent = $derived(extractReasoningContent(log.responseBody));
+  const tps = $derived(calculateTokensPerSecond(log));
 
   // Tabs configuration
   const tabs = [
@@ -125,107 +150,76 @@
   ];
 </script>
 
-<div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
-  <!-- Collapsed Header -->
+<div class="bg-white rounded-lg border border-gray-200 overflow-hidden hover:bg-gray-50 transition-colors">
+  <!-- Header Row (Logs page style) -->
   <button
     type="button"
-    class="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left"
+    class="w-full px-6 py-4 text-left"
     onclick={onToggle}
   >
-    <!-- Expand Icon -->
-    {#if isExpanded}
-      <ChevronDown size={18} class="text-gray-400 flex-shrink-0" />
-    {:else}
-      <ChevronUp size={18} class="text-gray-400 flex-shrink-0 rotate-[-90deg]" />
-    {/if}
-
-    <!-- Status Icon -->
-    <StatusIcon {status} />
-
-    <!-- Model Info -->
-    <div class="flex items-center gap-1 min-w-0">
-      <span class="font-mono text-sm text-gray-900 truncate">{log.model}</span>
-      <span class="text-gray-400">→</span>
-      <span class="font-mono text-sm text-gray-600 truncate">{log.targetModel}</span>
-    </div>
-
-    <!-- Streaming Indicator -->
-    {#if log.stream}
-      <span class="flex-shrink-0" title={status === 'streaming' || status === 'pending' ? 'Streaming in progress' : 'Was streaming'}>
-        {#if status === 'streaming' || status === 'pending'}
-          <!-- Animated indicator for active streaming -->
-          <span class="relative flex h-2 w-2">
-            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-            <span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-          </span>
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-4 min-w-0">
+        <!-- Success/Error Indicator -->
+        {#if isSuccess}
+          <CheckCircle class="text-green-500 shrink-0" size={20} />
         {:else}
-          <!-- Static indicator for completed streaming -->
-          <span class="inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+          <AlertCircle class="text-red-500 shrink-0" size={20} />
         {/if}
-      </span>
-    {/if}
 
-    <!-- Spacer -->
-    <div class="flex-1"></div>
+        <!-- Model Info -->
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-mono text-sm font-medium text-gray-900">{log.model}</span>
+            <ArrowRight size={14} class="text-gray-400" />
+            <span class="font-mono text-sm text-gray-600">{log.targetModel}</span>
+            {#if !log.routed}
+              <span class="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full">
+                Unrouted
+              </span>
+            {/if}
+          </div>
+          <div class="flex items-center gap-4 mt-1 text-sm text-gray-500">
+            <span>{log.provider}</span>
+            <span>⏰ {formatTime(log.timestamp)}</span>
+          </div>
+        </div>
+      </div>
 
-    <!-- Time -->
-    <span class="text-sm text-gray-500 flex-shrink-0">⏰ {formatTime(log.timestamp)}</span>
-  </button>
-
-  <!-- Collapsed Summary Line -->
-  {#if !isExpanded}
-    <div class="px-4 pb-3 flex items-center gap-3 text-sm">
-      <!-- Provider -->
-      <span class="flex items-center gap-1 text-gray-600 flex-shrink-0">
-        <ExternalLink size={12} />
-        {log.provider}
-      </span>
-      
-      <!-- Prompt Preview -->
-      <span class="text-gray-700 truncate flex-1" title={prompt}>
-        {truncatePrompt(prompt, 60)}
-      </span>
-      
-      <!-- Duration -->
-      <span class="text-gray-500 flex-shrink-0">{formatDuration(log.durationMs)}</span>
-      
-      <!-- Status Code -->
-      <span 
-        class="px-2 py-0.5 rounded text-xs font-mono flex-shrink-0"
-        class:bg-green-100={log.responseStatus < 400}
-        class:text-green-700={log.responseStatus < 400}
-        class:bg-red-100={log.responseStatus >= 400}
-        class:text-red-700={log.responseStatus >= 400}
-      >
-        ({log.responseStatus})
-      </span>
-    </div>
-  {/if}
-
-  <!-- Expanded Content -->
-  {#if isExpanded}
-    <div class="border-t border-gray-200">
-      <!-- Summary Line (also shown when expanded) -->
-      <div class="px-4 py-2 flex items-center gap-3 text-sm bg-gray-50 border-b border-gray-200">
-        <span class="flex items-center gap-1 text-gray-600">
-          <ExternalLink size={12} />
-          {log.provider}
+      <div class="flex items-center gap-4 flex-shrink-0">
+        <!-- Duration -->
+        <span class="text-sm font-medium text-gray-600">
+          {formatDuration(log.durationMs)}
         </span>
-        <span class="text-gray-700 truncate flex-1" title={prompt}>
-          {truncatePrompt(prompt, 80)}
-        </span>
-        <span class="text-gray-500">{formatDuration(log.durationMs)}</span>
+
+        <!-- HTTP Status Pill -->
         <span 
-          class="px-2 py-0.5 rounded text-xs font-mono"
+          class="px-2 py-1 rounded text-sm font-mono"
           class:bg-green-100={log.responseStatus < 400}
           class:text-green-700={log.responseStatus < 400}
           class:bg-red-100={log.responseStatus >= 400}
           class:text-red-700={log.responseStatus >= 400}
         >
-          ({log.responseStatus})
+          {log.responseStatus}
         </span>
-      </div>
 
+        <!-- Expand/Collapse Chevron -->
+        {#if isExpanded}
+          <ChevronUp size={20} class="text-gray-400" />
+        {:else}
+          <ChevronDown size={20} class="text-gray-400" />
+        {/if}
+      </div>
+    </div>
+
+    <!-- Prompt Preview (2nd line) -->
+    <div class="mt-2 text-sm text-gray-600 truncate pl-9" title={prompt}>
+      {truncatePrompt(prompt, 100)}
+    </div>
+  </button>
+
+  <!-- Expanded Content -->
+  {#if isExpanded}
+    <div class="border-t border-gray-200">
       <!-- Tabs -->
       <div class="flex border-b border-gray-200 overflow-x-auto">
         {#each tabs as tab}
@@ -245,7 +239,7 @@
       </div>
 
       <!-- Tab Content -->
-      <div class="p-4">
+      <div class="p-6">
         <!-- Message Tab -->
         {#if activeTab === 'message'}
           <div class="space-y-4">
@@ -298,9 +292,15 @@
         <!-- Response Tab (raw upstream) -->
         {#if activeTab === 'response'}
           <div class="space-y-3">
-            <div class="flex flex-wrap gap-4 text-sm text-gray-500">
+            <div class="flex flex-wrap gap-4 text-sm text-gray-500 items-center">
               <span>Original Format: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{log.targetScheme}</code></span>
               <span>From: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{log.provider}</code></span>
+              <span class="ml-auto flex items-center gap-3">
+                <span>Latency: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{formatDuration(log.durationMs)}</code></span>
+                {#if tps}
+                  <span>Tokens/s: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{tps}</code></span>
+                {/if}
+              </span>
             </div>
             {#if log.rawUpstreamResponse}
               <JsonViewer data={log.rawUpstreamResponse} />
@@ -315,9 +315,14 @@
         <!-- Transformed Response Tab -->
         {#if activeTab === 'transformedResponse'}
           <div class="space-y-3">
-            <div class="flex flex-wrap gap-4 text-sm text-gray-500">
+            <div class="flex flex-wrap gap-4 text-sm text-gray-500 items-center">
               <span>Transformed Format: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{log.sourceScheme}</code></span>
-              <span>Status: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{log.responseStatus}</code></span>
+              <span class="ml-auto flex items-center gap-3">
+                <span>Latency: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{formatDuration(log.durationMs)}</code></span>
+                {#if tps}
+                  <span>Tokens/s: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{tps}</code></span>
+                {/if}
+              </span>
             </div>
             {#if log.transformedResponse}
               <JsonViewer data={log.transformedResponse} />
@@ -376,10 +381,10 @@
               <span class="text-gray-500 block text-xs uppercase tracking-wider">Stream</span>
               <p class="text-gray-900">{log.stream ? 'Yes' : 'No'}</p>
             </div>
-            {#if log.tokensPerSecond}
+            {#if log.tokensPerSecond || tps}
               <div>
                 <span class="text-gray-500 block text-xs uppercase tracking-wider">Tokens/Second</span>
-                <p class="text-gray-900">{log.tokensPerSecond}</p>
+                <p class="text-gray-900">{log.tokensPerSecond || tps}</p>
               </div>
             {/if}
           </div>

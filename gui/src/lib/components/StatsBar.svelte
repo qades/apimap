@@ -86,17 +86,13 @@
     </div>
   </div>
 
-  <!-- Avg -->
+  <!-- Avg Latency -->
   <div class="bg-white rounded-xl border border-gray-200 p-4">
     <div class="flex items-center justify-between">
       <div>
-        <p class="text-sm font-medium text-gray-600">Avg</p>
+        <p class="text-sm font-medium text-gray-600">Avg Latency</p>
         <p class="text-2xl font-bold text-gray-900">{stats.avgLatency} <span class="text-sm font-normal">ms</span></p>
-        {#if stats.avgTokensPerSecond > 0}
-          <p class="text-base font-semibold text-gray-600">{stats.avgTokensPerSecond} t/s</p>
-        {:else}
-          <p class="text-base font-semibold text-gray-400">-</p>
-        {/if}
+        <!-- Single line card - no secondary value -->
       </div>
       <div class="w-10 h-10 bg-gray-50 rounded-lg flex items-center justify-center">
         <Clock class="text-gray-600" size={20} />
