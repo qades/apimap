@@ -63,6 +63,8 @@ jobs:
             ghcr.io/${{ github.repository }}
           tags: |
             type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
             type=sha,prefix=                  # short SHA (7 chars)
             type=sha,prefix=,format=long      # full SHA (40 chars)
             type=raw,value=latest,enable={{is_default_branch}}
@@ -98,11 +100,14 @@ jobs:
       - name: Generate release notes
         run: |
           REPO="${{ github.repository }}"
+          VERSION="${{ github.ref_name }}"
+          # Strip 'v' prefix for Docker tag if present
+          DOCKER_TAG="${VERSION#v}"
           cat > release_notes.md << EOF
           ## Docker Image
 
           \`\`\`bash
-          docker pull ghcr.io/${REPO}:latest
+          docker pull ghcr.io/${REPO}:${DOCKER_TAG}
           \`\`\`
 
           ## Quick Start
