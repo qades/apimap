@@ -224,6 +224,8 @@ export interface LogEntry {
   stream?: boolean;
   /** Tokens per second for the response */
   tokensPerSecond?: number;
+  /** Time to first byte (latency) in milliseconds - only for streaming */
+  latencyMs?: number;
 }
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {

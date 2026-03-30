@@ -459,6 +459,8 @@ export interface LogEntry {
   stream?: boolean;
   /** Tokens per second for the response */
   tokensPerSecond?: number;
+  /** Time to first byte (latency) in milliseconds */
+  latencyMs?: number;
 }
 
 // ============================================================================

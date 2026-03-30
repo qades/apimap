@@ -86,13 +86,13 @@
     </div>
   </div>
 
-  <!-- Avg Latency -->
+  <!-- Avg Latency (streaming only) -->
   <div class="bg-white rounded-xl border border-gray-200 p-4">
     <div class="flex items-center justify-between">
       <div>
         <p class="text-sm font-medium text-gray-600">Avg Latency</p>
         <p class="text-2xl font-bold text-gray-900">{stats.avgLatency} <span class="text-sm font-normal">ms</span></p>
-        <!-- Single line card - no secondary value -->
+        <p class="text-xs text-gray-400">streaming only</p>
       </div>
       <div class="w-10 h-10 bg-gray-50 rounded-lg flex items-center justify-center">
         <Clock class="text-gray-600" size={20} />

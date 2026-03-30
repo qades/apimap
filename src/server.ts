@@ -912,6 +912,8 @@ async function createStreamingResponse(
   // Track Anthropic content block state for proper block lifecycle
   let currentContentBlockIndex = 0;
   let currentContentBlockType: "text" | "tool_use" | null = isAnthropicSource ? "text" : null;
+  // Track latency - time to first byte
+  let firstByteReceived = false;
 
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
@@ -948,6 +950,12 @@ async function createStreamingResponse(
         
         if (readResult.done) break;
         const value = readResult.value;
+
+        // Track latency on first byte received
+        if (!firstByteReceived) {
+          firstByteReceived = true;
+          logEntry.latencyMs = Date.now() - startTime;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");

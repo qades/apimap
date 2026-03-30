@@ -50,8 +50,11 @@
     const running = 0; // Will be updated from active requests
     const runningStreaming = 0;
     
-    const totalLatency = logs.reduce((sum, l) => sum + l.durationMs, 0);
-    const avgLatency = total > 0 ? Math.round(totalLatency / total) : 0;
+    // Only calculate avg latency for streaming requests (time to first byte)
+    const streamingLogs = logs.filter(l => l.stream && l.latencyMs);
+    const avgLatency = streamingLogs.length > 0 
+      ? Math.round(streamingLogs.reduce((sum, l) => sum + (l.latencyMs || 0), 0) / streamingLogs.length)
+      : 0;
     
     const logsWithTps = logs.filter(l => l.tokensPerSecond);
     const avgTokensPerSecond = logsWithTps.length > 0

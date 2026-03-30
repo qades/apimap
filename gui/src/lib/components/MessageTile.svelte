@@ -93,41 +93,46 @@
 
   // Extract response content for Message tab
   function extractResponseContent(body: unknown): string {
-    if (!body || typeof body !== 'object') return '';
-    const b = body as Record<string, unknown>;
+    if (!body || typeof body !== 'object' || body === null) return '';
     
     // OpenAI format
-    if (b.choices && Array.isArray(b.choices) && b.choices.length > 0) {
-      const choice = b.choices[0];
+    const choices = (body as {choices?: unknown[]}).choices;
+    if (choices && Array.isArray(choices) && choices.length > 0) {
+      const choice = choices[0] as {message?: {content?: unknown}; delta?: {content?: unknown}};
       if (choice.message?.content) return String(choice.message.content);
       if (choice.delta?.content) return String(choice.delta.content);
     }
     
     // Anthropic format
-    if (b.content && Array.isArray(b.content) && b.content.length > 0) {
-      return b.content.map((c: {text?: string}) => c.text || '').join('');
+    const content = (body as {content?: unknown[]}).content;
+    if (content && Array.isArray(content) && content.length > 0) {
+      return content.map((c: {text?: string; type?: string}) => {
+        if (c.type === 'text') return c.text || '';
+        return '';
+      }).join('');
     }
     
     // String response
-    if (typeof b === 'string') return b;
+    if (typeof body === 'string') return body;
     
     return '';
   }
 
   // Extract reasoning content
   function extractReasoningContent(body: unknown): string {
-    if (!body || typeof body !== 'object') return '';
-    const b = body as Record<string, unknown>;
+    if (!body || typeof body !== 'object' || body === null) return '';
     
     // DeepSeek/OpenAI reasoning
-    if (b.choices && Array.isArray(b.choices) && b.choices.length > 0) {
-      const choice = b.choices[0];
+    const choices = (body as {choices?: unknown[]}).choices;
+    if (choices && Array.isArray(choices) && choices.length > 0) {
+      const choice = choices[0] as {message?: {reasoning_content?: unknown}};
       if (choice.message?.reasoning_content) return String(choice.message.reasoning_content);
     }
     
     // Anthropic thinking
-    if (b.content && Array.isArray(b.content)) {
-      const thinking = b.content.find((c: {type?: string}) => c.type === 'thinking');
+    const content = (body as {content?: unknown[]}).content;
+    if (content && Array.isArray(content)) {
+      const thinking = content.find((c: {type?: string; thinking?: string}) => c.type === 'thinking');
       if (thinking?.thinking) return thinking.thinking;
     }
     
@@ -305,7 +310,10 @@
               <span>Original Format: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{log.targetScheme}</code></span>
               <span>From: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{log.provider}</code></span>
               <span class="ml-auto flex items-center gap-3">
-                <span>Latency: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{formatDuration(log.durationMs)}</code></span>
+                <span>Duration: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{formatDuration(log.durationMs)}</code></span>
+                {#if log.stream && log.latencyMs}
+                  <span>Latency: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{formatDuration(log.latencyMs)}</code></span>
+                {/if}
                 {#if tps}
                   <span>Tokens/s: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{tps}</code></span>
                 {/if}
@@ -327,7 +335,10 @@
             <div class="flex flex-wrap gap-4 text-sm text-gray-500 items-center">
               <span>Transformed Format: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{log.sourceScheme}</code></span>
               <span class="ml-auto flex items-center gap-3">
-                <span>Latency: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{formatDuration(log.durationMs)}</code></span>
+                <span>Duration: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{formatDuration(log.durationMs)}</code></span>
+                {#if log.stream && log.latencyMs}
+                  <span>Latency: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{formatDuration(log.latencyMs)}</code></span>
+                {/if}
                 {#if tps}
                   <span>Tokens/s: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{tps}</code></span>
                 {/if}
