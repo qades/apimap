@@ -24,7 +24,14 @@
   let saveError: string | null = $state(null);
   let saveSuccess = $state(false);
   let testPattern = $state('');
-  let testResults: Array<{ model: string; matched: boolean; captures: string[] }> = $state([]);
+  let testResults: Array<{ 
+    model: string; 
+    matched: boolean; 
+    captures: string[];
+    provider?: string;
+    resolvedModel?: string;
+    pattern?: string;
+  }> = $state([]);
   
   // New route row state
   let isAdding = $state(false);
@@ -269,6 +276,7 @@
     for (const model of models) {
       let matched = false;
       let captures: string[] = [];
+      let matchedRoute: RouteConfig | undefined;
       
       for (const route of editingRoutes) {
         const regexPattern = route.pattern
@@ -282,11 +290,34 @@
         if (match) {
           matched = true;
           captures = match.slice(1);
+          matchedRoute = route;
           break;
         }
       }
       
-      testResults.push({ model, matched, captures });
+      // Calculate resolved model if there's a match
+      let resolvedModel: string | undefined;
+      if (matchedRoute) {
+        if (matchedRoute.model) {
+          // Apply template substitution
+          resolvedModel = matchedRoute.model.replace(/\$\{(\d+)\}/g, (match, num) => {
+            const index = parseInt(num, 10) - 1;
+            return captures[index] ?? match;
+          });
+        } else {
+          // No model mapping - use the original model
+          resolvedModel = model;
+        }
+      }
+      
+      testResults.push({ 
+        model, 
+        matched, 
+        captures,
+        provider: matchedRoute?.provider,
+        resolvedModel,
+        pattern: matchedRoute?.pattern
+      });
     }
   }
 
@@ -580,8 +611,11 @@
             <table class="w-full">
               <thead class="bg-gray-50">
                 <tr>
-                  <th class="px-4 py-2 text-left text-sm font-medium text-gray-600">Model</th>
+                  <th class="px-4 py-2 text-left text-sm font-medium text-gray-600">Test Model</th>
                   <th class="px-4 py-2 text-left text-sm font-medium text-gray-600">Status</th>
+                  <th class="px-4 py-2 text-left text-sm font-medium text-gray-600">Pattern</th>
+                  <th class="px-4 py-2 text-left text-sm font-medium text-gray-600">Provider</th>
+                  <th class="px-4 py-2 text-left text-sm font-medium text-gray-600">Resolved Model</th>
                   <th class="px-4 py-2 text-left text-sm font-medium text-gray-600">Captures</th>
                 </tr>
               </thead>
@@ -602,11 +636,26 @@
                         </span>
                       {/if}
                     </td>
+                    <td class="px-4 py-2 font-mono text-sm text-gray-700">
+                      {result.pattern ?? '-'}
+                    </td>
+                    <td class="px-4 py-2 text-sm">
+                      {#if result.provider}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                          {result.provider}
+                        </span>
+                      {:else}
+                        <span class="text-gray-400">-</span>
+                      {/if}
+                    </td>
+                    <td class="px-4 py-2 font-mono text-sm text-gray-700">
+                      {result.resolvedModel ?? '-'}
+                    </td>
                     <td class="px-4 py-2 text-sm">
                       {#if result.captures.length > 0}
-                        [{result.captures.join(', ')}]
+                        <code class="bg-gray-100 px-1.5 py-0.5 rounded text-xs">[{result.captures.join(', ')}]</code>
                       {:else}
-                        -
+                        <span class="text-gray-400">-</span>
                       {/if}
                     </td>
                   </tr>

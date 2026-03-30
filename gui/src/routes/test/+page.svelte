@@ -98,25 +98,16 @@
 
   async function loadModels() {
     try {
-      const res = await fetch(`${API_URL}/admin/routes`);
+      // Use /v1/models to get actual queryable model IDs (with route prefixes applied)
+      const res = await fetch(`${API_URL}/v1/models`);
       if (res.ok) {
         const data = await res.json();
-        // Extract patterns from routes as model suggestions
-        const patterns = data.routes.map((r: any) => r.pattern);
-        // Add some common examples based on patterns
-        const examples: string[] = [];
-        for (const pattern of patterns) {
-          if (pattern.includes('gpt-4')) {
-            examples.push('gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo');
-          } else if (pattern.includes('claude')) {
-            examples.push('claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307');
-          } else if (pattern.includes('local/')) {
-            examples.push('local/llama2', 'local/mistral', 'local/codellama');
-          } else {
-            examples.push(pattern.replace(/\*/g, ''));
-          }
+        // Extract model IDs from the OpenAI-compatible response
+        if (data.data && Array.isArray(data.data)) {
+          availableModels = data.data.map((m: any) => m.id);
+        } else {
+          availableModels = [];
         }
-        availableModels = [...new Set([...examples, ...patterns])].slice(0, 20);
       }
     } catch (err) {
       console.error('Failed to load models:', err);

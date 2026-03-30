@@ -1804,6 +1804,7 @@ async function fetchWithTimeoutModels(url: string, headers: Record<string, strin
 }
 
 // OpenAI-compatible /v1/models endpoint
+// Returns queryable model IDs that incorporate route pattern prefixes
 async function handleGetModelsOpenAI(corsHeaders: Record<string, string>): Promise<Response> {
   const models: Array<{
     id: string;
@@ -1817,17 +1818,36 @@ async function handleGetModelsOpenAI(corsHeaders: Record<string, string>): Promi
   const routes = state.router.getRoutes();
   const config = state.config.getConfig();
   
-  // Fetch models from all configured providers in parallel with timeout
-  const providerFetches = Object.entries(config.providers).map(async ([providerId, providerConfig]) => {
+  // Group routes by provider to fetch models once per provider
+  const routesByProvider = new Map<string, typeof routes>();
+  for (const route of routes) {
+    const existing = routesByProvider.get(route.provider) || [];
+    existing.push(route);
+    routesByProvider.set(route.provider, existing);
+  }
+  
+  // Fetch models from all providers that have routes
+  const providerFetches = Array.from(routesByProvider.entries()).map(async ([providerId, providerRoutes]) => {
     try {
       const provider = providerRegistry.get(providerId);
-      if (!provider) return [];
+      if (!provider) return { providerId, queryableModels: [] };
       
       const modelsUrl = provider.getModelsUrl();
-      if (!modelsUrl) return [];
+      if (!modelsUrl) {
+        // Provider doesn't support /models endpoint - fall back to pattern-based models
+        const patternModels: string[] = [];
+        for (const route of providerRoutes) {
+          const basePattern = route.pattern.replace(/[\*\?]/g, '');
+          if (basePattern && !seen.has(basePattern)) {
+            patternModels.push(basePattern);
+          }
+        }
+        return { providerId, queryableModels: patternModels };
+      }
+      
+      const providerConfig = config.providers[providerId];
       
       // Only send auth headers if provider has an API key configured
-      // Some local servers (LM Studio, Ollama, etc.) reject requests with empty Authorization headers
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
@@ -1846,25 +1866,31 @@ async function handleGetModelsOpenAI(corsHeaders: Record<string, string>): Promi
       
       // 3 second timeout for provider model fetching
       const response = await fetchWithTimeoutModels(modelsUrl, headers, 3000);
-      if (!response || !response.ok) return [];
+      if (!response || !response.ok) {
+        // Fall back to pattern-based models
+        const patternModels: string[] = [];
+        for (const route of providerRoutes) {
+          const basePattern = route.pattern.replace(/[\*\?]/g, '');
+          if (basePattern && !seen.has(basePattern)) {
+            patternModels.push(basePattern);
+          }
+        }
+        return { providerId, queryableModels: patternModels };
+      }
       
       const data = await response.json() as { 
         data?: Array<{ id: string; created?: number; owned_by?: string }>;
         models?: Array<{ id?: string; name?: string; model?: string; created?: number; owned_by?: string }>;
       };
       
-      const providerModels: Array<{ id: string; created: number; owned_by: string }> = [];
+      // Extract target model IDs from provider response
+      const targetModels: string[] = [];
       
       // Handle OpenAI-style response format (data array)
       if (data.data && Array.isArray(data.data)) {
         for (const model of data.data) {
-          if (model.id && !seen.has(model.id)) {
-            seen.add(model.id);
-            providerModels.push({
-              id: model.id,
-              created: model.created || now,
-              owned_by: model.owned_by || providerId,
-            });
+          if (model.id) {
+            targetModels.push(model.id);
           }
         }
       }
@@ -1872,53 +1898,62 @@ async function handleGetModelsOpenAI(corsHeaders: Record<string, string>): Promi
       else if (data.models && Array.isArray(data.models)) {
         for (const model of data.models) {
           const modelId = model.id || model.name || model.model || '';
-          if (modelId && !seen.has(modelId)) {
-            seen.add(modelId);
-            providerModels.push({
-              id: modelId,
-              created: model.created || now,
-              owned_by: model.owned_by || providerId,
-            });
+          if (modelId) {
+            targetModels.push(modelId);
           }
         }
       }
       
-      return providerModels;
+      log.debug(`[models] ${providerId}: Extracted ${targetModels.length} target models: ${targetModels.slice(0, 10).join(', ')}${targetModels.length > 10 ? '...' : ''}`);
+      
+      // Debug: Log routes being processed for this provider
+      for (const route of providerRoutes) {
+        log.debug(`[models] ${providerId}: Processing route pattern="${route.pattern}" model="${route.model ?? '(none)'}"`);
+      }
+      
+      // Generate queryable models by mapping target models through route patterns
+      const queryableModels: string[] = [];
+      for (const route of providerRoutes) {
+        const routeModels = state.router.generateQueryableModels(route, targetModels);
+        log.debug(`[models] ${providerId}: Route "${route.pattern}" generated: ${routeModels.join(', ') || '(none)'}`);
+        for (const modelId of routeModels) {
+          queryableModels.push(modelId);
+        }
+      }
+      
+      log.debug(`[models] ${providerId}: Total queryable models: ${queryableModels.length}`);
+      
+      return { providerId, queryableModels };
     } catch (error) {
       // Provider doesn't support /models endpoint or is unreachable - that's ok
       log.debug(`[models] Could not fetch from ${providerId}: ${error}`);
-      return [];
+      // Fall back to pattern-based models
+      const patternModels: string[] = [];
+      for (const route of routesByProvider.get(providerId) || []) {
+        const basePattern = route.pattern.replace(/[\*\?]/g, '');
+        if (basePattern) {
+          patternModels.push(basePattern);
+        }
+      }
+      return { providerId, queryableModels: patternModels };
     }
   });
   
   // Wait for all provider fetches to complete
   const providerResults = await Promise.allSettled(providerFetches);
   for (const result of providerResults) {
-    if (result.status === 'fulfilled' && result.value.length > 0) {
-      for (const model of result.value) {
-        models.push({
-          ...model,
-          object: "model",
-        });
+    if (result.status === 'fulfilled') {
+      for (const modelId of result.value.queryableModels) {
+        if (!seen.has(modelId)) {
+          seen.add(modelId);
+          models.push({
+            id: modelId,
+            object: "model",
+            created: now,
+            owned_by: result.value.providerId,
+          });
+        }
       }
-    }
-  }
-  
-  // Add models from route patterns (strip wildcards for cleaner display)
-  for (const route of routes) {
-    // Strip wildcards from pattern to get base model name
-    const basePattern = route.pattern.replace(/[\*\?]/g, '');
-    if (!basePattern) continue;
-    
-    // Use the stripped pattern as the model id
-    if (!seen.has(basePattern)) {
-      seen.add(basePattern);
-      models.push({
-        id: basePattern,
-        object: "model",
-        created: now,
-        owned_by: route.provider,
-      });
     }
   }
   
@@ -1931,6 +1966,7 @@ async function handleGetModelsOpenAI(corsHeaders: Record<string, string>): Promi
 }
 
 // Anthropic-compatible /v1/models endpoint
+// Returns queryable model IDs that incorporate route pattern prefixes
 async function handleGetModelsAnthropic(corsHeaders: Record<string, string>): Promise<Response> {
   const models: Array<{
     type: string;
@@ -1944,17 +1980,36 @@ async function handleGetModelsAnthropic(corsHeaders: Record<string, string>): Pr
   const config = state.config.getConfig();
   const now = new Date().toISOString();
   
-  // Fetch models from all configured providers in parallel with timeout
-  const providerFetches = Object.entries(config.providers).map(async ([providerId, providerConfig]) => {
+  // Group routes by provider to fetch models once per provider
+  const routesByProvider = new Map<string, typeof routes>();
+  for (const route of routes) {
+    const existing = routesByProvider.get(route.provider) || [];
+    existing.push(route);
+    routesByProvider.set(route.provider, existing);
+  }
+  
+  // Fetch models from all providers that have routes
+  const providerFetches = Array.from(routesByProvider.entries()).map(async ([providerId, providerRoutes]) => {
     try {
       const provider = providerRegistry.get(providerId);
-      if (!provider) return [];
+      if (!provider) return { providerId, queryableModels: [] as string[] };
       
       const modelsUrl = provider.getModelsUrl();
-      if (!modelsUrl) return [];
+      if (!modelsUrl) {
+        // Provider doesn't support /models endpoint - fall back to pattern-based models
+        const patternModels: string[] = [];
+        for (const route of providerRoutes) {
+          const basePattern = route.pattern.replace(/[\*\?]/g, '');
+          if (basePattern && !seen.has(basePattern)) {
+            patternModels.push(basePattern);
+          }
+        }
+        return { providerId, queryableModels: patternModels };
+      }
+      
+      const providerConfig = config.providers[providerId];
       
       // Only send auth headers if provider has an API key configured
-      // Some local servers (LM Studio, Ollama, etc.) reject requests with empty Authorization headers
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
@@ -1973,7 +2028,17 @@ async function handleGetModelsAnthropic(corsHeaders: Record<string, string>): Pr
       
       // 3 second timeout for provider model fetching
       const response = await fetchWithTimeoutModels(modelsUrl, headers, 3000);
-      if (!response || !response.ok) return [];
+      if (!response || !response.ok) {
+        // Fall back to pattern-based models
+        const patternModels: string[] = [];
+        for (const route of providerRoutes) {
+          const basePattern = route.pattern.replace(/[\*\?]/g, '');
+          if (basePattern && !seen.has(basePattern)) {
+            patternModels.push(basePattern);
+          }
+        }
+        return { providerId, queryableModels: patternModels };
+      }
       
       const data = await response.json() as { 
         data?: Array<{ 
@@ -1985,68 +2050,66 @@ async function handleGetModelsAnthropic(corsHeaders: Record<string, string>): Pr
         models?: Array<{ id?: string; name?: string; model?: string; created?: number }>;
       };
       
-      const providerModels: Array<{ type: string; id: string; display_name: string; created_at: string }> = [];
+      // Extract target model IDs from provider response
+      const targetModels: string[] = [];
       
       // Handle Anthropic/OpenAI-style response format (data array)
       if (data.data && Array.isArray(data.data)) {
         for (const model of data.data) {
-          if (model.id && !seen.has(model.id)) {
-            seen.add(model.id);
-            providerModels.push({
-              type: model.type || "model",
-              id: model.id,
-              display_name: model.display_name || model.id,
-              created_at: model.created_at || now,
-            });
+          if (model.id) {
+            targetModels.push(model.id);
           }
         }
       }
-      // Handle Ollama-style response format
+      // Handle Ollama-style response format (models array with 'name' field)
       else if (data.models && Array.isArray(data.models)) {
         for (const model of data.models) {
           const modelId = model.id || model.name || model.model || '';
-          if (modelId && !seen.has(modelId)) {
-            seen.add(modelId);
-            providerModels.push({
-              type: "model",
-              id: modelId,
-              display_name: modelId,
-              created_at: now,
-            });
+          if (modelId) {
+            targetModels.push(modelId);
           }
         }
       }
       
-      return providerModels;
+      // Generate queryable models by mapping target models through route patterns
+      const queryableModels: string[] = [];
+      for (const route of providerRoutes) {
+        const routeModels = state.router.generateQueryableModels(route, targetModels);
+        for (const modelId of routeModels) {
+          queryableModels.push(modelId);
+        }
+      }
+      
+      return { providerId, queryableModels };
     } catch (error) {
       log.debug(`[models] Could not fetch from ${providerId}: ${error}`);
-      return [];
+      // Fall back to pattern-based models
+      const patternModels: string[] = [];
+      for (const route of routesByProvider.get(providerId) || []) {
+        const basePattern = route.pattern.replace(/[\*\?]/g, '');
+        if (basePattern) {
+          patternModels.push(basePattern);
+        }
+      }
+      return { providerId, queryableModels: patternModels };
     }
   });
   
   // Wait for all provider fetches to complete
   const providerResults = await Promise.allSettled(providerFetches);
   for (const result of providerResults) {
-    if (result.status === 'fulfilled' && result.value.length > 0) {
-      models.push(...result.value);
-    }
-  }
-  
-  // Add models from route patterns (strip wildcards for cleaner display)
-  for (const route of routes) {
-    // Strip wildcards from pattern to get base model name
-    const basePattern = route.pattern.replace(/[\*\?]/g, '');
-    if (!basePattern) continue;
-    
-    // Use the stripped pattern as the model id
-    if (!seen.has(basePattern)) {
-      seen.add(basePattern);
-      models.push({
-        type: "model",
-        id: basePattern,
-        display_name: basePattern,
-        created_at: now,
-      });
+    if (result.status === 'fulfilled') {
+      for (const modelId of result.value.queryableModels) {
+        if (!seen.has(modelId)) {
+          seen.add(modelId);
+          models.push({
+            type: "model",
+            id: modelId,
+            display_name: modelId,
+            created_at: now,
+          });
+        }
+      }
     }
   }
   
