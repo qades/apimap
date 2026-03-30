@@ -1,6 +1,6 @@
 {
   "name": "apibench",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "LiteLLM vs API Map vs Direct - Benchmark Suite (Bun/TypeScript benchmark runner + mock server, Python only for PDF reports)",
   "type": "module",
   "scripts": {

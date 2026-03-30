@@ -1,6 +1,6 @@
 {
   "name": "universal-model-router",
-  "version": "2.0.0",
+  "version": "0.1.0",
   "description": "The ultimate AI model router - route requests between OpenAI, Anthropic, local models, and more",
   "module": "src/index.ts",
   "type": "module",
